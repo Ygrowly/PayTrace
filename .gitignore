@@ -1,0 +1,67 @@
+# --- Environment ---
+.env
+.env.local
+.env.*.local
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# uv lock is tracked, local cache is not
+# uv.lock is committed per § 5.4
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+build/
+.vercel/
+*.tsbuildinfo
+.npm
+.pnpm-store/
+
+# Generated types are tracked (§ 27.1), so do NOT ignore:
+# frontend/lib/api/schema.ts
+# backend/openapi.json
+
+# --- IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Docker volumes (local only) ---
+postgres_data/
+redis_data/
+minio_data/
+
+# --- Generated scenario data (large, local only) ---
+data/scenarios/*.parquet
+data/scenarios/*.json
+!data/scenarios/.gitkeep
+
+# --- Local artifacts / traces ---
+*.log
+logs/
+artifacts/
+traces/

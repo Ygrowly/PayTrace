@@ -1,0 +1,35 @@
+{
+  "name": "paytrace-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "description": "PayTrace Next.js workbench (M0a skeleton). UI code arrives in M0b/M3.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "echo '[M0a placeholder] vitest arrives in M0b' && exit 0",
+    "gen:api": "echo '[M0a placeholder] openapi-typescript gen arrives in M0b' && exit 0"
+  },
+  "dependencies": {
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "typescript": "5.7.3",
+    "tailwindcss": "4.3.3",
+    "@tailwindcss/postcss": "4.3.3",
+    "postcss": "8.5.1",
+    "eslint": "9.18.0",
+    "eslint-config-next": "16.2.10"
+  },
+  "engines": {
+    "node": ">=20.18.0"
+  },
+  "packageManager": "pnpm@10.15.0"
+}

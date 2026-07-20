@@ -1,0 +1,11 @@
+version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "paytrace-backend"
+version = "0.0.1"
+source = { editable = "." }
+
+[package.metadata]
+provides-extras = ["dev"]

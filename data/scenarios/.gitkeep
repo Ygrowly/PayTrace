@@ -1,0 +1,2 @@
+# 生成的支付事件场景数据（Parquet + Ground Truth JSON）存放在此。
+# 目录内文件仅本地使用，已加入 .gitignore。
