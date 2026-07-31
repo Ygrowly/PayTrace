@@ -85,3 +85,160 @@ Entries follow: `<date> · <milestone> · <summary>` with sections for
 - M0b: FastAPI `/health/live` + `/health/ready`, Celery heartbeat, Alembic
   framework + first migration (3 control-plane tables, no FK constraints),
   `scripts/export_openapi.py`, frontend `gen:api`, basic CI workflow.
+
+---
+
+## 2026-07-31 · M0a · Infrastructure smoke verified
+
+### Implemented
+- No source-code changes. Environment-only: emptied
+  `C:\Users\Lenovo\.docker\daemon.json` `registry-mirrors` to `[]` via
+  Docker Desktop GUI (previous 17 third-party mirrors were the root cause
+  of `failed commit on ref ... failed precondition` digest-mismatch pull
+  failures during `docker compose up`).
+
+### Verified
+- `docker compose up -d postgres redis minio minio-init` pulls and starts
+  all four services successfully (Container start-of-life follow-up to
+  M0a's "skipped per user instruction" gap).
+- `docker compose ps` shows all three long-running services healthy:
+  - `paytrace-postgres` (postgres:16-alpine) — `pg_isready` accepts,
+    `SELECT version()` returns `PostgreSQL 16.14 on x86_64-pc-linux-musl`.
+  - `paytrace-redis` (redis:7-alpine) — `PING` → `PONG`;
+    `SET m0a smoke EX 30` → `OK`, `GET m0a` → `smoke` (round-trip ok).
+  - `paytrace-minio` (RELEASE.2024-12-18T13-15-44Z) —
+    `GET /minio/health/live` → HTTP 200, `GET /minio/health/ready` → 200.
+- `minio-init` ran to completion (`Exited (0)`); logs show
+  `Added 'local' successfully` → `Bucket created successfully 'local/paytrace'`
+  → `Access permission ... set to 'download'`. Anonymous GET on bucket
+  `paytrace` lists 0 objects (empty), confirming bucket exists and is
+  publicly readable per compose config.
+
+### Deviations
+- None in code. `~/.docker/daemon.json` now contains
+  `"registry-mirrors": []`; previous file backed up as
+  `daemon.json.bak.20260731` in the same directory.
+
+### Risks
+- Empty `registry-mirrors` means pulls go directly through Docker Hub
+  via local `http.docker.internal:3128` proxy. This works today but may
+  be slow for large images (MinIO + postgres + redis pulled ~250MB in
+  roughly 5 minutes).
+- If additional hosts share this machine and rely on the previously
+  configured mirrors, they will now also route through the default Hub.
+
+### Next
+- Proceed to M0b per plan § M0b.
+
+---
+
+## 2026-07-31 · M0b · Service readiness verified
+
+### Scope
+M0b per plan: FastAPI health endpoints, Celery worker heartbeat, Alembic
+framework + first migration (3 control-plane tables), OpenAPI export +
+frontend type generation, Makefile completion, CI workflow. User-confirmed
+decisions: Q1=B (worker does `SELECT 1` on PG at startup), Q2=A+B (make
+installed, DEVLOG records equivalent commands), Q3=B (CI yaml written and
+locally verified, no PR pushed), Q4=A (stacked on `feat/m0-foundation`).
+
+### Implemented
+- `backend/app/config.py` — pydantic-settings; `env_file=(".env", "../.env")`;
+  default `database_url` port 54320.
+- `backend/app/db/base.py`, `db/session.py` — sync SQLAlchemy engine
+  (psycopg v3 sync driver) + `session_maker` + `get_db`.
+- `backend/app/db/models/` — `Incident`, `DiagnosisRun`, `DiagnosisRunEvent`
+  per plan § 10.3–10.5; zero DB-level FK constraints (ADR 0003);
+  `UNIQUE (incident_id, idempotency_key)` on `diagnosis_runs`;
+  `UNIQUE (diagnosis_run_id, sequence)` + JSONB payload on
+  `diagnosis_run_events`.
+- `backend/app/api/v1/health.py` — `/health/live` (no I/O) and
+  `/health/ready` (concurrent PG/Redis/MinIO checks via anyio task group,
+  per-dependency latency, HTTP 503 on any failure).
+- `backend/app/api/v1/ontology.py` — placeholder returning version stub.
+- `backend/app/main.py` — FastAPI factory, CORS scoped to
+  `settings.frontend_origin`, router at `/api/v1`.
+- `backend/app/tasks/celery_app.py`, `tasks/heartbeat.py` — Celery with
+  Redis broker/backend, `task_acks_late=True`,
+  `worker_prefetch_multiplier=1`; `@worker_ready` handler runs sync
+  `psycopg.connect` + `SELECT 1`, logs `worker_ready_pg_ok`.
+- `backend/alembic.ini`, `migrations/env.py`,
+  `migrations/versions/20260731_0001_create_control_plane_tables.py` —
+  hand-written migration creating the 3 tables with indexes/UNIQUE
+  constraints, zero FKs.
+- `backend/scripts/export_openapi.py` — dumps `app.openapi()` to
+  `backend/openapi.json` (committed).
+- `backend/tests/test_health.py` — 3 tests (liveness, ontology stub,
+  openapi declares core paths).
+- `frontend/app/page.tsx` — async server component fetching
+  `/api/v1/health/live` with `cache: "no-store"`, renders JSON or error.
+- `frontend/lib/api/schema.ts` — generated via `openapi-typescript` from
+  `backend/openapi.json` (committed); `package.json` adds `gen:api` script
+  + `openapi-typescript` devDep.
+- `frontend/eslint.config.mjs` — native flat config
+  (`eslint-config-next/core-web-vitals` + `eslint-config-next/typescript`);
+  `.eslintrc.json` removed (Next.js 16 dropped `next lint`).
+- `Makefile` — real targets: `migrate`, `run-api`, `run-worker`
+  (`-P solo`), `run-web`, `gen-openapi`, backend/frontend lint/test/
+  typecheck/build, aggregate `lint`/`test`.
+- `.github/workflows/ci.yml` — 4 jobs: `backend` (ruff + pytest),
+  `frontend` (lint + typecheck + build), `openapi-drift` (regenerate both
+  artifacts, `git diff --exit-code`), `integration` (compose up + alembic
+  upgrade + verify tables; uses port 5432 in GHA).
+
+### Verified
+- Backend quality gates: `uv run ruff check .` clean,
+  `uv run ruff format --check .` clean (34 files), `uv run pytest -q`
+  3 passed.
+- Migration: `alembic upgrade head` against fresh PG creates
+  `incidents`, `diagnosis_runs`, `diagnosis_run_events` +
+  `alembic_version`; `\d` output confirms zero FK constraints, correct
+  indexes and UNIQUE constraints.
+- API: `uvicorn app.main:app` serves
+  - `GET /api/v1/health/live` → `{"status":"ok"}`
+  - `GET /api/v1/health/ready` → 200 with all deps ok:
+    `postgres 30ms, redis 155ms, minio 218ms`
+  - `GET /api/v1/ontology` → placeholder JSON.
+- Worker: `celery -A app.tasks.celery_app worker -l info -P solo` log
+  shows `worker_ready_pg_ok` then `celery@LAPTOP-UIGENTE0 ready.`
+  (Q1=B satisfied).
+- Web: `pnpm dev` on :3000; homepage HTML contains rendered
+  `{"status": "ok"}` inside the liveness `<pre>` block — frontend →
+  backend cross-call confirmed server-side.
+- Contract drift: `uv run python scripts/export_openapi.py --out
+  openapi.json` → `git diff --stat backend/openapi.json` empty;
+  `pnpm gen:api` → `git diff --stat frontend/lib/api/schema.ts` empty.
+- Frontend gates: `pnpm typecheck`, `pnpm lint`, `pnpm build` all green.
+
+### Deviations
+- **Postgres host port 54320** (was 5432): local Windows `postgres.exe`
+  (PID 18992) was bound to 5432 and intercepted docker's port-forward,
+  causing `password authentication failed`. Changed `POSTGRES_PORT` and
+  `DATABASE_URL` defaults in `.env`, `.env.example`,
+  `docker-compose.yml`, `backend/app/config.py`. CI `integration` job
+  still uses 5432 (no conflict in GHA runners).
+- **Sync SQLAlchemy engine** (plan implied async): psycopg-async requires
+  `SelectorEventLoop`, but uvicorn on Windows uses `ProactorEventLoop` and
+  ignores `WindowsSelectorEventLoopPolicy` set in `app/main.py`. Switched
+  to sync engine + `anyio.to_thread.run_sync` in the readiness probe;
+  rationale documented in `backend/app/db/session.py` docstring. Revisit
+  in M2 if concurrency demands it.
+- **Stale shell env vars**: `DATABASE_URL`/`POSTGRES_PORT` exported in an
+  earlier session overrode `.env`; every backend command is now prefixed
+  with `unset DATABASE_URL POSTGRES_PORT ...` in this shell.
+- **CI not pushed**: per Q3=B, `.github/workflows/ci.yml` verified by
+  running equivalent commands locally; no PR opened this round.
+
+### Risks
+- Sync engine means each readiness probe occupies a thread-pool thread;
+  fine for M0b health checks, must be re-evaluated before real query load.
+- `run-worker` uses `-P solo` (Windows has no working prefork pool); solo
+  is single-threaded, acceptable for M0b heartbeat only.
+- `frontend_origin` CORS allows only one origin; multi-origin support
+  deferred until needed.
+- `openapi.json` / `schema.ts` drift is enforced only in CI, which is not
+  yet running on GitHub (no remote push yet).
+
+### Next
+- Commit M0b changes on `feat/m0-foundation` (single-purpose Conventional
+  Commit per repo rules), then proceed to M1 per plan.

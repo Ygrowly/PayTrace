@@ -2,15 +2,15 @@
   "name": "paytrace-frontend",
   "version": "0.0.1",
   "private": true,
-  "description": "PayTrace Next.js workbench (M0a skeleton). UI code arrives in M0b/M3.",
+  "description": "PayTrace Next.js workbench (M0b). Calls the FastAPI /api/v1/health/live endpoint.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "echo '[M0a placeholder] vitest arrives in M0b' && exit 0",
-    "gen:api": "echo '[M0a placeholder] openapi-typescript gen arrives in M0b' && exit 0"
+    "test": "echo '[M0b placeholder] vitest arrives in a later milestone' && exit 0",
+    "gen:api": "openapi-typescript ../backend/openapi.json -o lib/api/schema.ts"
   },
   "dependencies": {
     "next": "16.2.10",
@@ -18,15 +18,16 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
     "@types/node": "22.10.5",
     "@types/react": "19.2.0",
     "@types/react-dom": "19.2.0",
-    "typescript": "5.7.3",
-    "tailwindcss": "4.3.3",
-    "@tailwindcss/postcss": "4.3.3",
-    "postcss": "8.5.1",
     "eslint": "9.18.0",
-    "eslint-config-next": "16.2.10"
+    "eslint-config-next": "16.2.10",
+    "openapi-typescript": "7.6.1",
+    "postcss": "8.5.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.7.3"
   },
   "engines": {
     "node": ">=20.18.0"

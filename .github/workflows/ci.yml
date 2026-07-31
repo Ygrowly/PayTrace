@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend lint + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install backend deps
+        working-directory: backend
+        run: uv sync --extra dev --frozen
+
+      - name: Ruff lint
+        working-directory: backend
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        working-directory: backend
+        run: uv run ruff format --check .
+
+      - name: Pytest
+        working-directory: backend
+        run: uv run pytest -q
+
+  frontend:
+    name: Frontend lint + typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: frontend
+        run: pnpm lint
+
+      - name: Typecheck
+        working-directory: frontend
+        run: pnpm typecheck
+
+      - name: Build
+        working-directory: frontend
+        run: pnpm build
+
+  openapi-drift:
+    name: OpenAPI & schema drift check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install backend deps
+        working-directory: backend
+        run: uv sync --extra dev --frozen
+
+      - name: Regenerate openapi.json
+        working-directory: backend
+        run: uv run python scripts/export_openapi.py --out openapi.json
+
+      - name: Fail if openapi.json drifted
+        run: git diff --exit-code backend/openapi.json
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate frontend types
+        working-directory: frontend
+        run: pnpm gen:api
+
+      - name: Fail if schema.ts drifted
+        run: git diff --exit-code frontend/lib/api/schema.ts
+
+  integration:
+    name: Infra up + migrate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Start backing services
+        run: docker compose up -d postgres redis minio minio-init
+
+      - name: Wait for postgres healthy
+        run: |
+          for i in {1..30}; do
+            if docker exec paytrace-postgres pg_isready -U paytrace -d paytrace >/dev/null 2>&1; then
+              echo "postgres ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "postgres failed to become ready"
+          exit 1
+
+      - name: Install backend deps
+        working-directory: backend
+        run: uv sync --extra dev --frozen
+
+      - name: Run migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://paytrace:paytrace_dev@localhost:5432/paytrace
+          POSTGRES_PORT: "5432"
+        run: uv run alembic upgrade head
+
+      - name: Verify tables exist
+        run: |
+          docker exec paytrace-postgres psql -U paytrace -d paytrace -c "\dt" \
+            | grep -E "incidents|diagnosis_runs|diagnosis_run_events"
