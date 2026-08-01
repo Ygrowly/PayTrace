@@ -18,12 +18,14 @@ async def test_health_live_returns_ok() -> None:
     assert resp.json() == {"status": "ok"}
 
 
-async def test_health_ontology_placeholder_returns_version() -> None:
+async def test_health_ontology_returns_v1_registry() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/v1/ontology")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["version"] == "v0-placeholder"
+    assert body["version"] == "paytrace.ontology.v1"
+    assert len(body["objects"]) == 13
+    assert len(body["evidence_types"]) == 6
 
 
 async def test_openapi_declares_core_paths() -> None:

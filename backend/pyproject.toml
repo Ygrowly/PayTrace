@@ -18,6 +18,8 @@ dependencies = [
     "boto3>=1.35.0,<1.36.0",
     "pydantic>=2.9.0,<2.10.0",
     "pydantic-settings>=2.5.0,<2.6.0",
+    "duckdb>=1.1.0,<1.2.0",
+    "pyarrow>=17.0.0,<18.0.0",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +60,8 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 # Test files intentionally use plain asserts and may exec-like patterns.
 "tests/**/*.py" = ["S101"]
+# CLI scripts print progress to stdout.
+"scripts/**/*.py" = ["T201"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -242,3 +242,128 @@ locally verified, no PR pushed), Q4=A (stacked on `feat/m0-foundation`).
 ### Next
 - Commit M0b changes on `feat/m0-foundation` (single-purpose Conventional
   Commit per repo rules), then proceed to M1 per plan.
+
+---
+
+## 2026-08-01 · M1 · Data, Ontology v1, and deterministic diagnosis tools
+
+### Scope
+M1 per plan § 7/9/13/14: Canonical Payment Event, Ontology Registry v1,
+ArtifactStore (MinIO + Local), 5-kind scenario generator with Ground Truth
+isolation, PaymentAnalyticsSource protocol + DuckDB implementation, tool
+framework (ToolResult / ToolPolicy / ToolRegistry / EvidenceLedger), four
+deterministic diagnosis tools, and dataset quality validation.
+
+### Implemented
+- `backend/app/domain/events.py` — Canonical Payment Event pydantic model
+  (plan § 8): `EventType`, `FunnelStage` (9 stages, `FUNNEL_STAGE_ORDER`),
+  `EventStatus`, `Period`; field-level validation (non-negative amounts,
+  minor-unit integers, UTC timestamps).
+- `backend/app/ontology/registry.py` — Ontology v1
+  (`paytrace.ontology.v1`): 13 objects, 6 evidence types
+  (`FUNNEL_STAGE_DEGRADATION`, `DIMENSION_CONTRIBUTION`,
+  `BENEFIT_GAP_FRICTION`, `CHANNEL_TIMEOUT`, `ERROR_CODE_CONCENTRATION`,
+  `DATA_QUALITY_GAP`), links, metrics, dimensions, actions; cross-reference
+  validation at load. `GET /api/v1/ontology` now serves the real registry
+  (was the M0b placeholder).
+- `backend/app/harness/artifact_store.py` — `ArtifactStore` protocol +
+  `ArtifactRef`; `MinioArtifactStore` (boto3, `put_bytes` / `get_bytes` /
+  `create_download_url`) and `LocalArtifactStore` (tmp-dir backed, same
+  contract) for tests.
+- `backend/app/harness/scenarios/` — deterministic generator for the 5
+  scenario kinds (`normal`, `benefit_friction`, `channel_timeout`,
+  `mixed_failure`, `data_gap`). Per-period seed derived via
+  `sha256(f"{kind}:{seed}:{period}")`; baseline period always clean;
+  `created_at` pinned to `cfg.start_time` so datasets + Ground Truth are
+  byte-reproducible. `ground_truth.py` keeps GT in a separate module with
+  `GroundTruthLoader` (path-traversal rejected); `io.py` writes Parquet via
+  pyarrow with a sha256 checksum in `DatasetRef` (which never points at
+  GT).
+- `backend/app/analytics/base.py` — `PaymentAnalyticsSource` protocol
+  (5 methods) + query/result contracts; `ALLOWED_DIMENSIONS` whitelist
+  (`payment_method`, `payment_channel`, `region`, `currency`,
+  `client_version`).
+- `backend/app/analytics/duckdb_source.py` — `DuckDBAnalyticsSource`:
+  per-call in-memory connection over `read_parquet`, parameterised value
+  filters, whitelist-validated dimension identifiers, `upper(status)`
+  normalisation (StrEnum serialises lowercase). Funnel anomaly detection
+  uses **step-rate** deltas (threshold 0.05) — overall-rate deltas are
+  diluted by upstream attrition and dimension mix (channel-timeout fault
+  moved overall rate only ~4pp at `CHANNEL_SUCCEEDED`). `validate_dataset`
+  flags per-period missing stages, duplicate `event_id`s, and high
+  `benefit_id` null rate (>0.5).
+- `backend/app/tools/base.py` — `ToolResult` / `EvidenceDraft` (§ 13),
+  `ToolPolicy` (max 8 calls, sha256 fingerprint dedup, read-only
+  enforcement, dimension whitelist), `ToolRegistry` (rejects non-read-only
+  tools, times executions), `EvidenceLedger` (assigns `EV-NNN` codes; the
+  model never creates Evidence).
+- `backend/app/tools/diagnostic.py` — the four read-only tools:
+  `get_payment_funnel`, `breakdown_conversion_loss`, `analyze_benefit_gap`,
+  `inspect_payment_events`. Each offloads its full result payload to the
+  ArtifactStore (`tool_results/{tool_call_id}/{kind}.json`) and returns a
+  summary + EvidenceDrafts. `analyze_benefit_gap` always carries the
+  "observational friction evidence, not sole causal proof" warning
+  (plan § 13.3).
+- `backend/scripts/generate_scenarios.py` — CLI writing
+  `data/scenarios/events/<kind>.parquet` +
+  `data/scenarios/ground_truth/<kind>.ground_truth.json`.
+- Tests: 72 unit + 2 MinIO integration (74 total), incl. M1 acceptance
+  tests for mixed_failure dual evidence, data_gap warnings, and large
+  tool results round-tripping through real MinIO.
+
+### Verified
+- `uv run ruff check .` clean; `uv run ruff format --check .` clean
+  (52 files).
+- `uv run pytest -q` → **74 passed** (72 unit + 2 integration against the
+  docker-compose MinIO; integration module skips cleanly when MinIO is
+  unreachable).
+- M1 acceptance (plan § 28):
+  - mixed_failure yields `BENEFIT_GAP_FRICTION` + `CHANNEL_TIMEOUT` +
+    `FUNNEL_STAGE_DEGRADATION` evidence —
+    `test_mixed_failure_produces_benefit_and_timeout_evidence` (unit) and
+    `test_mixed_failure_dual_evidence_via_minio` (integration).
+  - data_gap yields warnings — `test_validate_dataset_data_gap_warns`
+    (missing stages + benefit_id null rate > 0.5).
+  - large tool results land in MinIO —
+    `test_large_tool_result_stored_in_minio` (2000-intent dataset, artifact
+    round-trip + presigned download URL).
+- Scenario reproducibility: same `(kind, seed)` → identical sha256 digest
+  of events + GT; different seed differs
+  (`test_scenario_generator.py`).
+- DuckDB adapter does not leak into tools: tools depend only on the
+  `PaymentAnalyticsSource` protocol and ArtifactStore protocol (verified
+  structurally — `app/tools/` imports nothing from `app/analytics/duckdb_source`).
+
+### Deviations
+- **Funnel anomaly detection on step-rate, not overall-rate** (plan § 13.1
+  implies overall): overall-rate deltas are diluted by upstream attrition
+  and dimension mix; a 30% timeout on one channel moved the overall rate
+  at `CHANNEL_SUCCEEDED` by only ~4pp, under the 0.05 threshold. Step-rate
+  (conditional on reaching the previous stage) isolates the stage's own
+  behaviour (~10pp for the same fault). Documented in
+  `duckdb_source.py` comments.
+- **`read_parquet(?)` cannot be parameterised** inside `CREATE VIEW`
+  (DuckDB binder limitation): the dataset path is interpolated after
+  `Path.resolve()` + single-quote escaping; all value filters remain
+  parameterised. `# noqa: S608` with justification comments.
+- **`scripts/**/*.py` per-file-ignore `T201`**: the scenario CLI prints
+  progress to stdout by design.
+- Integration tests live in `tests/test_integration_minio.py` with a
+  module-level `skipif` reachability probe, so unit-only runs (and CI
+  without MinIO) stay green.
+
+### Risks
+- `_ANOMALY_THRESHOLD = 0.05` is tuned for the M1 dataset scale
+  (≥400 intents/period); smaller samples will breach it from binomial
+  noise alone. Revisit when the harness supports scale sweeps.
+- `MinioArtifactStore` creates a boto3 client per instance; fine for M1
+  tool-call volumes, consider a shared client if M2 parallelism demands.
+- `EvidenceLedger` is in-memory per diagnosis run; persistence to
+  `diagnosis_run_events` arrives with the M2 orchestrator.
+- MinIO integration coverage depends on local compose stack; CI has no
+  MinIO service yet (unit tests use `LocalArtifactStore`).
+
+### Next
+- M2 per plan: LangGraph diagnosis orchestrator (planner → tool loop →
+  verifier), diagnosis_run persistence, SSE event stream, first end-to-end
+  incident diagnosis on the harness scenarios.
