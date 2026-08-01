@@ -71,15 +71,17 @@ class EvidenceType(StrEnum):
 
 
 class RootCauseLabel(StrEnum):
-    """Root-cause labels the model may choose from (plan § 15.3)."""
+    """Root-cause labels the model may choose from (plan § 15.3).
 
-    BENEFIT_FRICTION = "BENEFIT_FRICTION"
+    The model must NOT create arbitrary labels.
+    """
+
+    BENEFIT_SELECTION_FRICTION = "BENEFIT_SELECTION_FRICTION"
+    AUTHENTICATION_FAILURE = "AUTHENTICATION_FAILURE"
     CHANNEL_TIMEOUT = "CHANNEL_TIMEOUT"
-    CHANNEL_ERROR = "CHANNEL_ERROR"
-    AUTH_FRICTION = "AUTH_FRICTION"
-    CLIENT_REGRESSION = "CLIENT_REGRESSION"
-    NORMAL_FLUCTUATION = "NORMAL_FLUCTUATION"
-    NEEDS_DATA = "NEEDS_DATA"
+    CALLBACK_FAILURE = "CALLBACK_FAILURE"
+    NORMAL_PAYMENT_FAILURE = "NORMAL_PAYMENT_FAILURE"
+    DATA_QUALITY_ISSUE = "DATA_QUALITY_ISSUE"
     UNKNOWN = "UNKNOWN"
 
 

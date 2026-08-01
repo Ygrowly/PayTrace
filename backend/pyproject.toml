@@ -62,6 +62,8 @@ select = [
 "tests/**/*.py" = ["S101"]
 # CLI scripts print progress to stdout.
 "scripts/**/*.py" = ["T201"]
+# FastAPI endpoints use Depends() in function defaults — the framework convention.
+"app/api/**/*.py" = ["B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

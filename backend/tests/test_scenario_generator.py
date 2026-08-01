@@ -74,7 +74,7 @@ def test_benefit_friction_injects_cancel_and_switch():
     types = {e.event_type for e in incident}
     assert EventType.ORDER_CANCELLED in types
     assert EventType.PAYMENT_METHOD_SWITCHED in types
-    assert gt.expected_root_causes == ["BENEFIT_FRICTION"]
+    assert gt.expected_root_causes == ["BENEFIT_SELECTION_FRICTION"]
     assert gt.injected_parameters.benefit_gap_shift_minor > 0
 
 
@@ -93,7 +93,7 @@ def test_mixed_failure_has_both_signatures():
     types = {e.event_type for e in incident}
     assert EventType.ORDER_CANCELLED in types
     assert EventType.PAYMENT_TIMEOUT in types
-    assert set(gt.expected_root_causes) == {"BENEFIT_FRICTION", "CHANNEL_TIMEOUT"}
+    assert set(gt.expected_root_causes) == {"BENEFIT_SELECTION_FRICTION", "CHANNEL_TIMEOUT"}
     assert set(gt.expected_anomalous_stages) == {
         FunnelStage.PAYMENT_METHOD_SELECTED.value,
         FunnelStage.CHANNEL_SUCCEEDED.value,
@@ -113,7 +113,7 @@ def test_data_gap_drops_stages_and_nulls_benefit():
         FunnelStage.CHANNEL_SUCCEEDED.value,
         "benefit_id",
     }
-    assert gt.expected_root_causes == ["NEEDS_DATA"]
+    assert gt.expected_root_causes == ["DATA_QUALITY_ISSUE"]
 
 
 def test_event_ids_unique_per_scenario():

@@ -321,7 +321,7 @@ def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
         return GroundTruth(
             scenario_id=kind,
             expected_anomalous_stages=[FunnelStage.PAYMENT_METHOD_SELECTED.value],
-            expected_root_causes=["BENEFIT_FRICTION"],
+            expected_root_causes=["BENEFIT_SELECTION_FRICTION"],
             affected_dimensions={"payment_method": _PAYMENT_METHODS},
             injected_parameters=_params_for(kind, Period.INCIDENT),
             expected_data_gaps=[],
@@ -346,7 +346,7 @@ def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
                 FunnelStage.PAYMENT_METHOD_SELECTED.value,
                 FunnelStage.CHANNEL_SUCCEEDED.value,
             ],
-            expected_root_causes=["BENEFIT_FRICTION", "CHANNEL_TIMEOUT"],
+            expected_root_causes=["BENEFIT_SELECTION_FRICTION", "CHANNEL_TIMEOUT"],
             affected_dimensions={
                 "payment_method": _PAYMENT_METHODS,
                 "payment_channel": ["channel_b"],
@@ -360,7 +360,7 @@ def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
         return GroundTruth(
             scenario_id=kind,
             expected_anomalous_stages=[],
-            expected_root_causes=["NEEDS_DATA"],
+            expected_root_causes=["DATA_QUALITY_ISSUE"],
             affected_dimensions={},
             injected_parameters=_params_for(kind, Period.INCIDENT),
             expected_data_gaps=[
@@ -374,7 +374,7 @@ def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
     return GroundTruth(
         scenario_id=kind,
         expected_anomalous_stages=[],
-        expected_root_causes=["NORMAL_FLUCTUATION"],
+        expected_root_causes=["NORMAL_PAYMENT_FAILURE"],
         affected_dimensions={},
         injected_parameters=InjectedParameters(),
         expected_data_gaps=[],
