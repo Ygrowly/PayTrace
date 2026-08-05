@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     minio_bucket: str = "paytrace"
     minio_secure: bool = False
 
+    # Local runtime roots used by the deterministic harness and M3 report
+    # artifacts. Relative values are resolved from the monorepo root.
+    scenario_root: str = "data/scenarios"
+    artifact_root: str = "data/artifacts"
+
     # API.
     api_host: str = "0.0.0.0"  # noqa: S104 - binding all interfaces is intentional for local dev
     api_port: int = 8000

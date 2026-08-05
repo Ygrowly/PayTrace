@@ -367,3 +367,65 @@ deterministic diagnosis tools, and dataset quality validation.
 - M2 per plan: LangGraph diagnosis orchestrator (planner → tool loop →
   verifier), diagnosis_run persistence, SSE event stream, first end-to-end
   incident diagnosis on the harness scenarios.
+
+---
+
+## 2026-08-03 · M3 · Evaluation Runner and product workbench
+
+### Implemented
+- Added `evaluation_runs` persistence and Alembic migration
+  `20260803_0003_create_m3_evaluation_tables.py`, including idempotency,
+  lifecycle, configuration snapshots, aggregate metrics, scenario results,
+  badcases, timing, and report artifact keys.
+- Added the deterministic B0 evaluation runner. It materialises the five
+  harness scenarios, runs the existing diagnosis workflow, loads Ground Truth
+  only after diagnosis, computes stage/root-cause/evidence/loss metrics, and
+  writes JSON/Markdown reports to the local ArtifactStore.
+- Added EvaluationRun API and Celery task with idempotent submission,
+  dispatch-failure persistence, polling/listing, and report downloads.
+- Added deterministic simulated Incident creation and funnel inspection,
+  scenario filtering, persisted diagnosis trace/SSE replay, evidence lookup,
+  and local Artifact content/download endpoints.
+- Added the Incident list/detail and Eval Lab pages with React Query polling,
+  ECharts funnel/metric charts, SSE progress, report/badcase states, and
+  data-gap/error handling. The UI follows the M3 data-dense blue/amber
+  dashboard design system.
+- Added M3 API documentation, generated OpenAPI/TypeScript contract updates,
+  runtime scenario ignore rules, and local setup instructions.
+
+### Verified
+- Docker services: PostgreSQL, Redis, and MinIO all report healthy via
+  `docker compose ps`.
+- Migration: `uv run --no-cache alembic upgrade head` succeeded and
+  `uv run --no-cache alembic current` reports
+  `0003_create_m3_evaluation_tables (head)`.
+- Backend: `uv run pytest -q` → **124 passed**, 6 dependency deprecation
+  warnings; `uv run ruff check .` and `uv run ruff format --check .` passed.
+- M3 API subset: `uv run pytest -q tests/test_incidents_api.py
+  tests/test_evaluation_api.py` → **39 passed**.
+- Frontend: `pnpm gen:api`, `pnpm typecheck`, `pnpm lint`, and `pnpm build`
+  all passed. The production build generated `/`, `/incidents`, `/eval`, and
+  `/incidents/[id]` successfully.
+- OpenAPI export and TypeScript regeneration completed from the current
+  backend contract.
+- A real local B0 EvaluationRun completed 5 scenarios with 100% run success;
+  JSON and Markdown report artifacts were persisted for manual UI inspection.
+- `git diff --check` passed; only existing line-ending normalization warnings
+  were reported by Git.
+
+### Deviations
+- The frontend has no unit-test runner in this milestone; the user requested
+  to perform browser acceptance manually. Browser validation was therefore not
+  run by Codex and remains the user's final acceptance step.
+- M3 exposes B0 (`RuleBasedModelAdapter`) only; paid/model-backed B1 execution
+  remains outside this milestone.
+
+### Risks
+- The API and EvaluationRun worker require the local Docker services and a
+  running Celery worker; the frontend alone cannot execute queued work.
+- Runtime scenario files and local report artifacts are intentionally local
+  and ignored by Git.
+
+### Next
+- Start the API, Celery worker, and frontend, then manually verify the
+  Incident and Eval Lab flows in the browser.

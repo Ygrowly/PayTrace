@@ -1,8 +1,8 @@
 """Artifact ORM (plan § 10.12).
 
-Artifact metadata stored in-object-store.  M2b only needs the minimal ORM
-to satisfy FK-less integrity cross-references; the full artifact lifecycle
-(explicit upload, download URL, expiration) is deferred.
+Artifact metadata stored in-object-store.  Diagnosis and evaluation reports
+use the same FK-less metadata record; local development exposes content and
+download-url endpoints while the full remote lifecycle remains deferred.
 """
 
 import uuid
@@ -30,4 +30,7 @@ class ArtifactRecord(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (Index("ix_artifacts_diagnosis_run_id", "diagnosis_run_id"),)
+    __table_args__ = (
+        Index("ix_artifacts_diagnosis_run_id", "diagnosis_run_id"),
+        Index("ix_artifacts_evaluation_run_id", "evaluation_run_id"),
+    )

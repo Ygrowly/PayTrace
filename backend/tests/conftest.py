@@ -22,6 +22,7 @@ from app.db.models import (
     DiagnosisReportRecord,
     DiagnosisRun,
     DiagnosisRunEvent,
+    EvaluationRun,
     EvidenceRecord,
     Incident,
     RootCauseFinding,
@@ -40,7 +41,11 @@ _ENGINE = None
 def _pg_reachable() -> bool:
     global _ENGINE
     try:
-        _ENGINE = create_engine(get_settings().database_url, pool_pre_ping=True)
+        _ENGINE = create_engine(
+            get_settings().database_url,
+            pool_pre_ping=True,
+            connect_args={"connect_timeout": 2},
+        )
         with _ENGINE.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
@@ -63,6 +68,7 @@ _CLEANUP_TABLES = (
     EvidenceRecord,
     ToolExecution,
     ArtifactRecord,
+    EvaluationRun,
     DiagnosisRun,
     Incident,
 )

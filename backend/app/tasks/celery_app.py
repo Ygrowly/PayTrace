@@ -14,7 +14,7 @@ celery_app = Celery(
     "paytrace",
     broker=settings.redis_url,
     backend=settings.redis_url,
-    include=["app.tasks.heartbeat", "app.tasks.diagnosis"],
+    include=["app.tasks.heartbeat", "app.tasks.diagnosis", "app.tasks.evaluation"],
 )
 
 celery_app.conf.update(

@@ -53,6 +53,15 @@ class IncidentCreate(BaseModel):
     ontology_version: str = Field(min_length=1, max_length=32)
 
 
+class SimulatedIncidentCreate(BaseModel):
+    """Request that the harness materialise one demo scenario as an Incident."""
+
+    scenario_kind: str = Field(default="mixed_failure", min_length=1, max_length=64)
+    seed: int = 42
+    num_intents: int = Field(default=500, ge=1, le=10_000)
+    title: str | None = Field(default=None, max_length=255)
+
+
 class IncidentResponse(BaseModel):
     """GET /incidents, GET /incidents/{id} response."""
 
@@ -74,6 +83,8 @@ class IncidentResponse(BaseModel):
     description: str | None
     created_at: datetime
     updated_at: datetime
+    latest_diagnosis_run_id: UUID | None = None
+    latest_diagnosis_status: str | None = None
 
 
 class IncidentListResponse(BaseModel):
@@ -161,3 +172,59 @@ class ReportResponse(BaseModel):
     ontology_version: str
     validator_version: str
     created_at: datetime
+    alternative_explanations: list[str] = Field(default_factory=list)
+
+
+class DiagnosisRunEventSchema(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    sequence: int
+    event_type: str
+    stage: str | None
+    message: str | None
+    payload: dict | None
+    created_at: datetime
+
+
+class ToolExecutionSchema(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: UUID
+    tool_call_id: str
+    tool_name: str
+    status: str
+    duration_ms: int | None
+    row_count: int | None
+    artifact_id: UUID | None
+    error_type: str | None
+    error_message: str | None
+
+
+class EvidenceResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: UUID
+    evidence_code: str
+    tool_execution_id: UUID
+    evidence_type: str
+    title: str
+    summary: str
+    metrics: dict | None
+    filters: dict | None
+    artifact_id: UUID | None
+    created_at: datetime
+
+
+class DiagnosisTraceResponse(BaseModel):
+    diagnosis_run_id: UUID
+    events: list[DiagnosisRunEventSchema]
+    tool_executions: list[ToolExecutionSchema]
+    evidence: list[EvidenceResponse]
+
+
+class ArtifactDownloadResponse(BaseModel):
+    artifact_id: UUID
+    url: str
+    expires_seconds: int
+    content_type: str

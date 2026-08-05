@@ -8,6 +8,7 @@ No Celery, no DB persistence, no SSE — those are M2b/M2c concerns.
 """
 
 import uuid
+from dataclasses import dataclass
 
 from app.analytics.base import PaymentAnalyticsSource
 from app.diagnosis.adapter import RuleBasedModelAdapter
@@ -16,7 +17,7 @@ from app.diagnosis.model import DiagnosisContext, ModelAdapter
 from app.diagnosis.report import DiagnosisReport
 from app.diagnosis.validator import ReportValidator, ValidationIssue
 from app.harness.artifact_store import ArtifactStore
-from app.tools.base import EvidenceLedger, ToolPolicy, ToolRegistry
+from app.tools.base import EvidenceLedger, ToolPolicy, ToolRegistry, ToolResult
 from app.tools.diagnostic import build_default_tools
 
 _DEFAULT_DIMENSIONS = ("payment_channel", "payment_method")
@@ -24,6 +25,22 @@ _DEFAULT_DIMENSIONS = ("payment_channel", "payment_method")
 
 class OrchestratorFailure(Exception):
     """Raised when the orchestrator cannot produce a valid report."""
+
+
+@dataclass
+class DiagnosisExecution:
+    """A report plus the trace needed by API and evaluation consumers.
+
+    ``run()`` intentionally keeps returning only ``DiagnosisReport`` for the
+    M2 callers. M3 consumers use this richer result so scoring and the UI can
+    inspect system-produced evidence and tool timings without re-running the
+    diagnostic workflow or putting business calculations in the frontend.
+    """
+
+    report: DiagnosisReport
+    ledger: EvidenceLedger
+    tool_results: tuple[ToolResult, ...]
+    validation_issues: tuple[ValidationIssue, ...]
 
 
 class DiagnosisOrchestrator:
@@ -47,6 +64,7 @@ class DiagnosisOrchestrator:
         validator: ReportValidator | None = None,
         dimensions: tuple[str, ...] = _DEFAULT_DIMENSIONS,
         max_retries: int = 1,
+        evidence_code_prefix: str = "",
     ) -> None:
         self._source = source
         self._artifacts = artifacts
@@ -54,6 +72,7 @@ class DiagnosisOrchestrator:
         self._validator = validator or ReportValidator()
         self._dimensions = dimensions
         self._max_retries = max_retries
+        self._evidence_code_prefix = evidence_code_prefix
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -75,6 +94,26 @@ class DiagnosisOrchestrator:
             diagnosis_run_id: Unique run identifier (auto-generated if None).
             scenario_id: Optional scenario kind label for traceability.
         """
+        return self.run_detailed(
+            dataset_ref,
+            incident_id=incident_id,
+            diagnosis_run_id=diagnosis_run_id,
+            scenario_id=scenario_id,
+        ).report
+
+    def run_detailed(
+        self,
+        dataset_ref: str,
+        *,
+        incident_id: str | None = None,
+        diagnosis_run_id: str | None = None,
+        scenario_id: str = "",
+    ) -> DiagnosisExecution:
+        """Run diagnosis and retain evidence, tool results, and validation.
+
+        The additional trace is produced by the same fixed workflow as
+        :meth:`run`; it is not a second or evaluation-only diagnostic path.
+        """
         iid = incident_id or f"inc-{uuid.uuid4().hex[:12]}"
         rid = diagnosis_run_id or f"run-{uuid.uuid4().hex[:12]}"
 
@@ -82,7 +121,9 @@ class DiagnosisOrchestrator:
         missing_data, _ = self._validate_dataset(dataset_ref)
 
         # Step 2: execute tool pipeline
-        ledger, anomalous_stages, funnel_summary = self._run_tool_pipeline(dataset_ref)
+        ledger, anomalous_stages, funnel_summary, tool_results = self._run_tool_pipeline(
+            dataset_ref
+        )
 
         # Step 3: build context
         context = ContextBuilder().build(
@@ -110,7 +151,12 @@ class DiagnosisOrchestrator:
                 f"retries: {codes}"
             )
 
-        return report
+        return DiagnosisExecution(
+            report=report,
+            ledger=ledger,
+            tool_results=tuple(tool_results),
+            validation_issues=tuple(issues),
+        )
 
     # ------------------------------------------------------------------
     # Step 1: dataset validation
@@ -130,15 +176,18 @@ class DiagnosisOrchestrator:
     # Step 2: tool pipeline
     # ------------------------------------------------------------------
 
-    def _run_tool_pipeline(self, dataset_ref: str) -> tuple[EvidenceLedger, list[str], str]:
-        """Execute the fixed-4-tool pipeline and return ledger, stages, summary."""
+    def _run_tool_pipeline(
+        self, dataset_ref: str
+    ) -> tuple[EvidenceLedger, list[str], str, list[ToolResult]]:
+        """Execute the fixed-4-tool pipeline and return its trace details."""
         tools = build_default_tools(self._source, self._artifacts)
         registry = ToolRegistry()
         for t in tools:
             registry.register(t)
 
         policy = ToolPolicy()
-        ledger = EvidenceLedger()
+        ledger = EvidenceLedger(prefix=self._evidence_code_prefix)
+        tool_results: list[ToolResult] = []
         call_idx = 0
 
         # 2a. get_payment_funnel (always)
@@ -147,6 +196,7 @@ class DiagnosisOrchestrator:
         )
         call_idx += 1
         ledger.record_result(funnel_res)
+        tool_results.append(funnel_res)
         anomalous_stages = [
             e.metrics["stage"]
             for e in funnel_res.evidence
@@ -160,6 +210,7 @@ class DiagnosisOrchestrator:
         )
         call_idx += 1
         ledger.record_result(benefit_res)
+        tool_results.append(benefit_res)
 
         # 2c. inspect_payment_events (always — self-detects timeouts)
         inspect_res = registry.execute(
@@ -167,6 +218,7 @@ class DiagnosisOrchestrator:
         )
         call_idx += 1
         ledger.record_result(inspect_res)
+        tool_results.append(inspect_res)
 
         # 2d. breakdown_conversion_loss — only when anomalous stages exist
         #     (plan: "定位异常阶段 → breakdown_conversion_loss").
@@ -181,8 +233,9 @@ class DiagnosisOrchestrator:
                 )
                 call_idx += 1
                 ledger.record_result(breakdown_res)
+                tool_results.append(breakdown_res)
 
-        return ledger, anomalous_stages, funnel_summary
+        return ledger, anomalous_stages, funnel_summary, tool_results
 
     # ------------------------------------------------------------------
     # Step 4: generate + validate + retry

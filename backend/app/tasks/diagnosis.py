@@ -134,13 +134,15 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
             source=source,
             artifacts=None,  # M2b: no artifact store yet
             dimensions=("payment_channel", "payment_method"),
+            evidence_code_prefix=run_id.hex[:8],
         )
-        report = orch.run(
+        execution = orch.run_detailed(
             dataset_ref=dataset_ref,
             incident_id=str(run.incident_id),
             diagnosis_run_id=str(run_id),
             scenario_id=scenario_id,
         )
+        report = execution.report
     except (OrchestratorFailure, ValueError, FileNotFoundError) as exc:
         logger.exception("run_diagnosis: orchestrator failed  run_id=%s", run_id)
         with _db() as db:
@@ -209,6 +211,8 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
             stage=final_status,
             message=f"Diagnosis completed: {report.summary[:500]}",
         )
+
+        service.persist_execution_trace(db, run_id=run_id, execution=execution)
 
         service.persist_report(
             db,

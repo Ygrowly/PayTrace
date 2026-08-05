@@ -1,6 +1,6 @@
 # PayTrace 后端
 
-> 状态：**M0a 骨架** —— 尚无应用代码。
+> 状态：**M3 已实现** —— FastAPI、异步诊断与 B0 评测运行器已接通。
 
 该包后续将承载：FastAPI、Celery Worker 入口、Code-first Ontology、
 Diagnostic Harness、四个诊断工具、DuckDB 分析适配器、ArtifactStore
@@ -8,9 +8,24 @@ Diagnostic Harness、四个诊断工具、DuckDB 分析适配器、ArtifactStore
 
 ## 当前状态
 
-- `pyproject.toml` 声明包元数据与 Python 版本要求。
-- `app/` 及其子目录已创建，但不含任何模块。
-- 暂未锁定任何运行时依赖 —— 这些会在 M0b / M1 引入。
+- `app/` 提供健康检查、Incident/DiagnosisRun、证据/Artifact 与 EvaluationRun API。
+- `app/evaluation/` 提供确定性的 B0 规则评测、指标聚合、badcase 与报告 Artifact。
+- `app/harness/scenarios/` 生成五类场景；运行时事件数据与 Ground Truth 分开存储。
+- `migrations/versions/20260803_0003_create_m3_evaluation_tables.py` 创建评测运行表。
+
+## 本地命令
+
+```bash
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --port 8000
+uv run celery -A app.tasks.celery_app worker -l info -P solo
+uv run pytest -q
+uv run ruff check .
+```
+
+OpenAPI 契约由 `scripts/export_openapi.py` 导出；修改路由后运行仓库根目录的
+`make gen-openapi` 同步前端类型。
 
 ## 目录规划（按方案 § 6）
 
@@ -34,10 +49,11 @@ app/
   observability/     # 结构化日志、Trace（M2/M4）
 ```
 
-## 下一里程碑（M0b）
+## M3 API 入口
 
-- FastAPI 占位接口：`/api/v1/health/live`、`/api/v1/health/ready`、
-  `/api/v1/ontology`。
-- Celery Worker 心跳。
-- Alembic 框架 + 首个 Migration（三张控制面表，无 FK）。
-- `scripts/export_openapi.py`，并将 `backend/openapi.json` 提交到仓库。
+- `POST/GET /api/v1/incidents` 与 `POST /api/v1/incidents/simulated`
+- `POST /api/v1/incidents/{id}/diagnosis-runs`、状态、报告、trace、SSE
+- `GET /api/v1/evidence/{code}` 与 Artifact 下载/内容接口
+- `POST/GET /api/v1/evaluation-runs`、详情与 JSON/Markdown 报告
+
+完整请求/响应契约见 [`docs/api.md`](../docs/api.md)。

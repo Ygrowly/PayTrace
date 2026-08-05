@@ -2,7 +2,7 @@
   "name": "paytrace-frontend",
   "version": "0.0.1",
   "private": true,
-  "description": "PayTrace Next.js workbench (M0b). Calls the FastAPI /api/v1/health/live endpoint.",
+  "description": "PayTrace Next.js workbench for incidents, diagnosis traces, and evaluation runs.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -13,6 +13,8 @@
     "gen:api": "openapi-typescript ../backend/openapi.json -o lib/api/schema.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.4",
+    "echarts": "^6.1.0",
     "next": "16.2.10",
     "react": "19.2.7",
     "react-dom": "19.2.7"

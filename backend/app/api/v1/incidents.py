@@ -8,12 +8,19 @@ POST /incidents/{id}/diagnosis-runs/{run_id}/retry
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.analytics.base import FunnelQuery, FunnelResult
+from app.analytics.duckdb_source import DuckDBAnalyticsSource
+from app.config import get_settings
 from app.db.session import get_db
+from app.evaluation.runner import resolve_runtime_path
+from app.harness.scenarios.generator import ScenarioConfig, generate_scenario
+from app.harness.scenarios.ground_truth import SCENARIO_KINDS, GroundTruthLoader
+from app.harness.scenarios.io import write_dataset
 from app.incidents import service
 from app.incidents.schemas import (
     DiagnosisRunRetryResponse,
@@ -23,7 +30,9 @@ from app.incidents.schemas import (
     IncidentListResponse,
     IncidentResponse,
     PaginationMeta,
+    SimulatedIncidentCreate,
 )
+from app.ontology.registry import ONTOLOGY_VERSION
 from app.tasks.diagnosis import run_diagnosis
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -32,6 +41,16 @@ router = APIRouter(prefix="/incidents", tags=["incidents"])
 def _trace_id(request: Request) -> str:
     """Extract or generate a trace_id from request state."""
     return getattr(request.state, "trace_id", str(uuid.uuid4()))
+
+
+def _incident_response(db: Session, incident) -> IncidentResponse:  # noqa: ANN001
+    latest = service.get_latest_run_for_incident(db, incident.id)
+    return IncidentResponse.model_validate(incident).model_copy(
+        update={
+            "latest_diagnosis_run_id": latest.id if latest else None,
+            "latest_diagnosis_status": latest.status if latest else None,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +76,7 @@ def create_incident(body: IncidentCreate, db: Session = Depends(get_db)) -> Inci
         ontology_version=body.ontology_version,
     )
     db.commit()
-    return IncidentResponse.model_validate(incident)
+    return _incident_response(db, incident)
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +89,7 @@ def list_incidents(
     page: int = 1,
     page_size: int = 20,
     status_filter: str | None = None,
+    scenario_id: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     db: Session = Depends(get_db),
@@ -79,11 +99,12 @@ def list_incidents(
         page=page,
         page_size=page_size,
         status=status_filter,
+        scenario_id=scenario_id,
         date_from=date_from,
         date_to=date_to,
     )
     return IncidentListResponse(
-        items=[IncidentResponse.model_validate(i) for i in items],
+        items=[_incident_response(db, i) for i in items],
         pagination=PaginationMeta(page=page, page_size=page_size, total=total),
     )
 
@@ -104,7 +125,76 @@ def get_incident(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Incident {incident_id} not found",
         )
-    return IncidentResponse.model_validate(incident)
+    return _incident_response(db, incident)
+
+
+@router.post(
+    "/simulated",
+    response_model=IncidentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_simulated_incident(
+    body: SimulatedIncidentCreate, db: Session = Depends(get_db)
+) -> IncidentResponse:
+    """Materialise a deterministic harness scenario and create its Incident."""
+    if body.scenario_kind not in SCENARIO_KINDS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported scenario kind: {body.scenario_kind}",
+        )
+
+    settings = get_settings()
+    cfg = ScenarioConfig(kind=body.scenario_kind, seed=body.seed, num_intents=body.num_intents)
+    events, ground_truth = generate_scenario(cfg)
+    scenario_root = resolve_runtime_path(settings.scenario_root)
+    dataset_ref = write_dataset(events, scenario_root / "events", body.scenario_kind)
+    GroundTruthLoader(scenario_root / "ground_truth").save(ground_truth)
+
+    funnel = DuckDBAnalyticsSource().get_funnel(FunnelQuery(dataset_ref=dataset_ref.path))
+    baseline_value = (
+        funnel.baseline.completed_count / funnel.baseline.order_confirmed_count
+        if funnel.baseline.order_confirmed_count
+        else 0.0
+    )
+    observed_value = (
+        funnel.incident.completed_count / funnel.incident.order_confirmed_count
+        if funnel.incident.order_confirmed_count
+        else 0.0
+    )
+    incident = service.create_incident(
+        db,
+        title=body.title or f"Simulated {body.scenario_kind} payment incident",
+        scenario_id=body.scenario_kind,
+        dataset_ref=dataset_ref.path,
+        baseline_start=cfg.start_time,
+        baseline_end=cfg.start_time + timedelta(days=cfg.baseline_days),
+        incident_start=cfg.start_time + timedelta(days=cfg.baseline_days),
+        incident_end=cfg.start_time + timedelta(days=cfg.baseline_days + cfg.incident_days),
+        trigger_metric="payment_completion_rate",
+        baseline_value=baseline_value,
+        observed_value=observed_value,
+        description=(
+            f"Deterministic {body.scenario_kind} scenario, seed={body.seed}, "
+            f"intents={body.num_intents}."
+        ),
+        ontology_version=ONTOLOGY_VERSION,
+    )
+    db.commit()
+    return _incident_response(db, incident)
+
+
+@router.get("/{incident_id}/funnel", response_model=FunnelResult)
+def get_incident_funnel(incident_id: uuid.UUID, db: Session = Depends(get_db)) -> FunnelResult:
+    incident = service.get_incident(db, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+    try:
+        return DuckDBAnalyticsSource().get_funnel(FunnelQuery(dataset_ref=incident.dataset_ref))
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Incident dataset is unavailable: {exc}",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

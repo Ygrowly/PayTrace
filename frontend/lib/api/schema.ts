@@ -45,8 +45,310 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Ontology */
+        /**
+         * Get Ontology
+         * @description Return the full v1 Ontology registry (objects, links, metrics,
+         *     dimensions, actions, evidence types).
+         */
         get: operations["get_ontology_api_v1_ontology_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Incidents */
+        get: operations["list_incidents_api_v1_incidents_get"];
+        put?: never;
+        /** Create Incident */
+        post: operations["create_incident_api_v1_incidents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/{incident_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Incident */
+        get: operations["get_incident_api_v1_incidents__incident_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/simulated": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Simulated Incident
+         * @description Materialise a deterministic harness scenario and create its Incident.
+         */
+        post: operations["create_simulated_incident_api_v1_incidents_simulated_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/{incident_id}/funnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Incident Funnel */
+        get: operations["get_incident_funnel_api_v1_incidents__incident_id__funnel_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/{incident_id}/diagnosis-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Diagnosis
+         * @description Trigger an async diagnosis run for an incident.
+         *
+         *     Requires ``Idempotency-Key`` header per plan § 17.1.  Returns 202
+         *     with the DiagnosisRun ID immediately; the actual work happens in a
+         *     Celery worker.
+         */
+        post: operations["trigger_diagnosis_api_v1_incidents__incident_id__diagnosis_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/{incident_id}/diagnosis-runs/{run_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Diagnosis
+         * @description Retry a failed diagnosis run.
+         *
+         *     Creates a new DiagnosisRun with a new idempotency key and dispatches
+         *     a fresh Celery task.  The original run is left as-is.
+         */
+        post: operations["retry_diagnosis_api_v1_incidents__incident_id__diagnosis_runs__run_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/diagnosis-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Diagnosis Run */
+        get: operations["get_diagnosis_run_api_v1_diagnosis_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/diagnosis-runs/{run_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Diagnosis Report */
+        get: operations["get_diagnosis_report_api_v1_diagnosis_runs__run_id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/diagnosis-runs/{run_id}/trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Diagnosis Trace */
+        get: operations["get_diagnosis_trace_api_v1_diagnosis_runs__run_id__trace_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/diagnosis-runs/{run_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Diagnosis Events
+         * @description Replay persisted run events and follow them briefly over SSE.
+         *
+         *     The database event log is the source of truth. A reconnect starts after
+         *     ``Last-Event-ID`` and therefore cannot lose events already committed by a
+         *     worker. The stream ends after a terminal event or a bounded idle window;
+         *     clients can reconnect with the last sequence number.
+         */
+        get: operations["stream_diagnosis_events_api_v1_diagnosis_runs__run_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evidence/{evidence_code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evidence */
+        get: operations["get_evidence_api_v1_evidence__evidence_code__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifacts/{artifact_id}/download-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Artifact Download Url */
+        get: operations["get_artifact_download_url_api_v1_artifacts__artifact_id__download_url_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/artifacts/{artifact_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Artifact Content */
+        get: operations["get_artifact_content_api_v1_artifacts__artifact_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evaluation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Evaluations */
+        get: operations["list_evaluations_api_v1_evaluation_runs_get"];
+        put?: never;
+        /** Create Evaluation */
+        post: operations["create_evaluation_api_v1_evaluation_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evaluation-runs/{evaluation_run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Evaluation */
+        get: operations["get_evaluation_api_v1_evaluation_runs__evaluation_run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/evaluation-runs/{evaluation_run_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Evaluation Report */
+        get: operations["download_evaluation_report_api_v1_evaluation_runs__evaluation_run_id__report_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -59,6 +361,80 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ActionDefinition */
+        ActionDefinition: {
+            action_type: components["schemas"]["ActionType"];
+            /** Description */
+            description: string;
+            /** Exposed To Frontend */
+            exposed_to_frontend: boolean;
+            /**
+             * Ontology Version
+             * @default paytrace.ontology.v1
+             * @constant
+             * @enum {string}
+             */
+            ontology_version: "paytrace.ontology.v1";
+        };
+        /**
+         * ActionType
+         * @enum {string}
+         */
+        ActionType: "CreateIncident" | "RunDiagnosis" | "RetryDiagnosis" | "RequestData" | "AcceptCause" | "RejectCause" | "ResolveIncident";
+        /**
+         * AggregateMetrics
+         * @description Summary metrics across all scenarios in one EvaluationRun (§ 20.2).
+         */
+        AggregateMetrics: {
+            /** Scenario Count */
+            scenario_count: number;
+            /** Succeeded Count */
+            succeeded_count: number;
+            /** Run Success Rate */
+            run_success_rate: number;
+            /** Stage Localization Exact Rate */
+            stage_localization_exact_rate: number;
+            /** Stage Localization Overlap Mean */
+            stage_localization_overlap_mean: number;
+            /** Root Cause Precision Mean */
+            root_cause_precision_mean: number;
+            /** Root Cause Recall Mean */
+            root_cause_recall_mean: number;
+            /** Root Cause F1 Mean */
+            root_cause_f1_mean: number;
+            /** Evidence Validity Rate Mean */
+            evidence_validity_rate_mean: number;
+            /** Unsupported Claim Rate Mean */
+            unsupported_claim_rate_mean: number;
+            /** Loss Attribution Mae */
+            loss_attribution_mae?: number | null;
+            /** Tool Call Count Mean */
+            tool_call_count_mean?: number | null;
+            /** Latency Ms Mean */
+            latency_ms_mean?: number | null;
+            /** Badcase Count */
+            badcase_count: number;
+            /** Total Input Tokens */
+            total_input_tokens?: number | null;
+            /** Total Output Tokens */
+            total_output_tokens?: number | null;
+            /** Estimated Cost */
+            estimated_cost?: number | null;
+        };
+        /** ArtifactDownloadResponse */
+        ArtifactDownloadResponse: {
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Url */
+            url: string;
+            /** Expires Seconds */
+            expires_seconds: number;
+            /** Content Type */
+            content_type: string;
+        };
         /** DependencyStatus */
         DependencyStatus: {
             /**
@@ -71,6 +447,514 @@ export interface components {
             /** Detail */
             detail?: string | null;
         };
+        /** DiagnosisRunEventSchema */
+        DiagnosisRunEventSchema: {
+            /** Id */
+            id: number;
+            /** Sequence */
+            sequence: number;
+            /** Event Type */
+            event_type: string;
+            /** Stage */
+            stage: string | null;
+            /** Message */
+            message: string | null;
+            /** Payload */
+            payload: Record<string, never> | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * DiagnosisRunResponse
+         * @description GET /diagnosis-runs/{id} response — run status only, no report payload.
+         */
+        DiagnosisRunResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Incident Id
+             * Format: uuid
+             */
+            incident_id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Status */
+            status: string;
+            /** Model Provider */
+            model_provider: string | null;
+            /** Model Name */
+            model_name: string | null;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /** Ontology Version */
+            ontology_version: string | null;
+            /** Attempt Number */
+            attempt_number: number;
+            /** Celery Task Id */
+            celery_task_id: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Error Type */
+            error_type: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Total Duration Ms */
+            total_duration_ms: number | null;
+            /** Input Tokens */
+            input_tokens: number | null;
+            /** Output Tokens */
+            output_tokens: number | null;
+            /** Estimated Cost */
+            estimated_cost: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * DiagnosisRunRetryResponse
+         * @description 202 response for POST /incidents/{id}/diagnosis-runs/{run_id}/retry.
+         */
+        DiagnosisRunRetryResponse: {
+            /**
+             * New Diagnosis Run Id
+             * Format: uuid
+             */
+            new_diagnosis_run_id: string;
+            /**
+             * Original Run Id
+             * Format: uuid
+             */
+            original_run_id: string;
+            /** Status */
+            status: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * DiagnosisRunTriggerResponse
+         * @description 202 response for POST /incidents/{id}/diagnosis-runs.
+         */
+        DiagnosisRunTriggerResponse: {
+            /**
+             * Diagnosis Run Id
+             * Format: uuid
+             */
+            diagnosis_run_id: string;
+            /** Status */
+            status: string;
+            /** Message */
+            message: string;
+        };
+        /** DiagnosisTraceResponse */
+        DiagnosisTraceResponse: {
+            /**
+             * Diagnosis Run Id
+             * Format: uuid
+             */
+            diagnosis_run_id: string;
+            /** Events */
+            events: components["schemas"]["DiagnosisRunEventSchema"][];
+            /** Tool Executions */
+            tool_executions: components["schemas"]["ToolExecutionSchema"][];
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceResponse"][];
+        };
+        /** DimensionDefinition */
+        DimensionDefinition: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /**
+             * Ontology Version
+             * @default paytrace.ontology.v1
+             * @constant
+             * @enum {string}
+             */
+            ontology_version: "paytrace.ontology.v1";
+        };
+        /**
+         * ErrorResponse
+         * @description Unified error shape per plan § 18.6.
+         */
+        ErrorResponse: {
+            /**
+             * Code
+             * @description Machine-readable error code, e.g. INVALID_IDEMPOTENCY_KEY
+             */
+            code: string;
+            /**
+             * Message
+             * @description Human-readable error description
+             */
+            message: string;
+            /**
+             * Details
+             * @description Optional detail list
+             */
+            details?: string[] | null;
+            /**
+             * Trace Id
+             * @description Request trace id for correlation
+             */
+            trace_id: string;
+        };
+        /** EvaluationRunCreate */
+        EvaluationRunCreate: {
+            /**
+             * Model Mode
+             * @default B0
+             * @constant
+             * @enum {string}
+             */
+            model_mode: "B0";
+            /**
+             * Prompt Version
+             * @default rule-based.v1
+             */
+            prompt_version: string | null;
+            /** Scenario Kinds */
+            scenario_kinds?: string[];
+            /**
+             * Seed
+             * @default 42
+             */
+            seed: number;
+            /**
+             * Num Intents
+             * @default 500
+             */
+            num_intents: number;
+        };
+        /** EvaluationRunListResponse */
+        EvaluationRunListResponse: {
+            /** Items */
+            items: components["schemas"]["EvaluationRunResponse"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
+        };
+        /** EvaluationRunResponse */
+        EvaluationRunResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+            /** Status */
+            status: string;
+            /** Model Mode */
+            model_mode: string;
+            /** Model Name */
+            model_name: string | null;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /** Ontology Version */
+            ontology_version: string | null;
+            /** Scenario Kinds */
+            scenario_kinds: string[];
+            /** Scenario Count */
+            scenario_count: number;
+            /** Seed */
+            seed: number;
+            /** Num Intents */
+            num_intents: number;
+            metrics: components["schemas"]["AggregateMetrics"] | null;
+            /** Scenario Results */
+            scenario_results: components["schemas"]["ScenarioResult"][] | null;
+            /** Badcases */
+            badcases: Record<string, never>[] | null;
+            /** Report Json Key */
+            report_json_key: string | null;
+            /** Report Markdown Key */
+            report_markdown_key: string | null;
+            /** Error Type */
+            error_type: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Celery Task Id */
+            celery_task_id: string | null;
+            /** Total Duration Ms */
+            total_duration_ms: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+        };
+        /** EvaluationRunTriggerResponse */
+        EvaluationRunTriggerResponse: {
+            /**
+             * Evaluation Run Id
+             * Format: uuid
+             */
+            evaluation_run_id: string;
+            /** Status */
+            status: string;
+            /** Message */
+            message: string;
+        };
+        /** EvidenceResponse */
+        EvidenceResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Evidence Code */
+            evidence_code: string;
+            /**
+             * Tool Execution Id
+             * Format: uuid
+             */
+            tool_execution_id: string;
+            /** Evidence Type */
+            evidence_type: string;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /** Metrics */
+            metrics: Record<string, never> | null;
+            /** Filters */
+            filters: Record<string, never> | null;
+            /** Artifact Id */
+            artifact_id: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * EvidenceType
+         * @description Kinds of deterministic evidence a tool may produce.
+         * @enum {string}
+         */
+        EvidenceType: "FUNNEL_STAGE_DEGRADATION" | "DIMENSION_CONTRIBUTION" | "BENEFIT_GAP_FRICTION" | "CHANNEL_TIMEOUT" | "ERROR_CODE_CONCENTRATION" | "DATA_GAP";
+        /** EvidenceTypeDefinition */
+        EvidenceTypeDefinition: {
+            evidence_type: components["schemas"]["EvidenceType"];
+            /** Description */
+            description: string;
+            /**
+             * Ontology Version
+             * @default paytrace.ontology.v1
+             * @constant
+             * @enum {string}
+             */
+            ontology_version: "paytrace.ontology.v1";
+        };
+        /** FunnelPeriodStats */
+        FunnelPeriodStats: {
+            /**
+             * Period
+             * @enum {string}
+             */
+            period: "baseline" | "incident";
+            /** Stages */
+            stages: components["schemas"]["FunnelStageStat"][];
+            /** Order Confirmed Count */
+            order_confirmed_count: number;
+            /** Completed Count */
+            completed_count: number;
+        };
+        /** FunnelResult */
+        FunnelResult: {
+            baseline: components["schemas"]["FunnelPeriodStats"];
+            incident: components["schemas"]["FunnelPeriodStats"];
+            /** Deltas */
+            deltas: components["schemas"]["FunnelStageDelta"][];
+            /** Anomalous Stages */
+            anomalous_stages: string[];
+        };
+        /** FunnelStageDelta */
+        FunnelStageDelta: {
+            /** Stage */
+            stage: string;
+            /** Baseline Overall Rate */
+            baseline_overall_rate: number;
+            /** Incident Overall Rate */
+            incident_overall_rate: number;
+            /** Rate Delta */
+            rate_delta: number;
+            /** Estimated Lost Intents */
+            estimated_lost_intents: number;
+        };
+        /** FunnelStageStat */
+        FunnelStageStat: {
+            /** Stage */
+            stage: string;
+            /** Reached Count */
+            reached_count: number;
+            /** Step Rate */
+            step_rate: number | null;
+            /** Overall Rate */
+            overall_rate: number;
+        };
+        /** HTTPValidationError */
+        HTTPValidationError: {
+            /** Detail */
+            detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * IncidentCreate
+         * @description POST /incidents request body.
+         */
+        IncidentCreate: {
+            /** Title */
+            title: string;
+            /** Scenario Id */
+            scenario_id: string;
+            /** Dataset Ref */
+            dataset_ref: string;
+            /**
+             * Baseline Start
+             * Format: date-time
+             */
+            baseline_start: string;
+            /**
+             * Baseline End
+             * Format: date-time
+             */
+            baseline_end: string;
+            /**
+             * Incident Start
+             * Format: date-time
+             */
+            incident_start: string;
+            /**
+             * Incident End
+             * Format: date-time
+             */
+            incident_end: string;
+            /** Trigger Metric */
+            trigger_metric: string;
+            /** Baseline Value */
+            baseline_value: number;
+            /** Observed Value */
+            observed_value: number;
+            /** Description */
+            description?: string | null;
+            /** Ontology Version */
+            ontology_version: string;
+        };
+        /** IncidentListResponse */
+        IncidentListResponse: {
+            /** Items */
+            items: components["schemas"]["IncidentResponse"][];
+            pagination: components["schemas"]["PaginationMeta"];
+        };
+        /**
+         * IncidentResponse
+         * @description GET /incidents, GET /incidents/{id} response.
+         */
+        IncidentResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Title */
+            title: string;
+            /** Scenario Id */
+            scenario_id: string;
+            /** Dataset Ref */
+            dataset_ref: string;
+            /**
+             * Baseline Start
+             * Format: date-time
+             */
+            baseline_start: string;
+            /**
+             * Baseline End
+             * Format: date-time
+             */
+            baseline_end: string;
+            /**
+             * Incident Start
+             * Format: date-time
+             */
+            incident_start: string;
+            /**
+             * Incident End
+             * Format: date-time
+             */
+            incident_end: string;
+            /** Trigger Metric */
+            trigger_metric: string;
+            /** Baseline Value */
+            baseline_value: number;
+            /** Observed Value */
+            observed_value: number;
+            /** Status */
+            status: string;
+            /** Ontology Version */
+            ontology_version: string;
+            /** Description */
+            description: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Latest Diagnosis Run Id */
+            latest_diagnosis_run_id?: string | null;
+            /** Latest Diagnosis Status */
+            latest_diagnosis_status?: string | null;
+        };
+        /** LinkDefinition */
+        LinkDefinition: {
+            link_type: components["schemas"]["LinkType"];
+            source: components["schemas"]["ObjectType"];
+            target: components["schemas"]["ObjectType"];
+            /**
+             * Ontology Version
+             * @default paytrace.ontology.v1
+             * @constant
+             * @enum {string}
+             */
+            ontology_version: "paytrace.ontology.v1";
+        };
+        /**
+         * LinkType
+         * @enum {string}
+         */
+        LinkType: "contains" | "opens" | "creates" | "uses" | "routed_to" | "affects" | "supported_by" | "evaluates";
         /** LivenessResponse */
         LivenessResponse: {
             /**
@@ -80,12 +964,82 @@ export interface components {
              */
             status: "ok";
         };
-        /** OntologyPlaceholder */
-        OntologyPlaceholder: {
-            /** Version */
-            version: string;
-            /** Note */
-            note: string;
+        /** MetricDefinition */
+        MetricDefinition: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Unit */
+            unit: string;
+            /**
+             * Ontology Version
+             * @default paytrace.ontology.v1
+             * @constant
+             * @enum {string}
+             */
+            ontology_version: "paytrace.ontology.v1";
+        };
+        /** ObjectDefinition */
+        ObjectDefinition: {
+            object_type: components["schemas"]["ObjectType"];
+            /** Description */
+            description: string;
+            /**
+             * Ontology Version
+             * @default paytrace.ontology.v1
+             * @constant
+             * @enum {string}
+             */
+            ontology_version: "paytrace.ontology.v1";
+        };
+        /**
+         * ObjectType
+         * @enum {string}
+         */
+        ObjectType: "PurchaseIntent" | "Order" | "CheckoutSession" | "PaymentAttempt" | "PaymentMethod" | "Benefit" | "PaymentChannel" | "PaymentEvent" | "Incident" | "DiagnosisRun" | "Evidence" | "DiagnosisReport" | "EvaluationRun";
+        /**
+         * OntologyRegistry
+         * @description Immutable v1 registry. Validated at construction; no runtime mutation.
+         */
+        OntologyRegistry: {
+            /**
+             * Version
+             * @default paytrace.ontology.v1
+             * @constant
+             * @enum {string}
+             */
+            version: "paytrace.ontology.v1";
+            /** Objects */
+            objects: components["schemas"]["ObjectDefinition"][];
+            /** Links */
+            links: components["schemas"]["LinkDefinition"][];
+            /** Metrics */
+            metrics: components["schemas"]["MetricDefinition"][];
+            /** Dimensions */
+            dimensions: components["schemas"]["DimensionDefinition"][];
+            /** Actions */
+            actions: components["schemas"]["ActionDefinition"][];
+            /** Evidence Types */
+            evidence_types: components["schemas"]["EvidenceTypeDefinition"][];
+        };
+        /** PaginationMeta */
+        PaginationMeta: {
+            /**
+             * Page
+             * @description Current page (1-based)
+             */
+            page: number;
+            /**
+             * Page Size
+             * @description Items per page
+             */
+            page_size: number;
+            /**
+             * Total
+             * @description Total matching items
+             */
+            total: number;
         };
         /** ReadinessResponse */
         ReadinessResponse: {
@@ -98,6 +1052,181 @@ export interface components {
             dependencies: {
                 [key: string]: components["schemas"]["DependencyStatus"];
             };
+        };
+        /**
+         * ReportResponse
+         * @description GET /diagnosis-runs/{id}/report response.
+         */
+        ReportResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Diagnosis Run Id
+             * Format: uuid
+             */
+            diagnosis_run_id: string;
+            /** Status */
+            status: string;
+            /** Summary */
+            summary: string;
+            /** Total Estimated Lost Intents */
+            total_estimated_lost_intents: number;
+            /** Explained Lost Intents */
+            explained_lost_intents: number;
+            /** Unexplained Lost Intents */
+            unexplained_lost_intents: number;
+            /** Missing Data */
+            missing_data: string[];
+            /** Recommended Actions */
+            recommended_actions: string[];
+            /** Root Causes */
+            root_causes: components["schemas"]["RootCauseSchema"][];
+            /** Ontology Version */
+            ontology_version: string;
+            /** Validator Version */
+            validator_version: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Alternative Explanations */
+            alternative_explanations?: string[];
+        };
+        /** RootCauseSchema */
+        RootCauseSchema: {
+            /** Label */
+            label: string;
+            /** Category */
+            category: string | null;
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "LOW" | "MEDIUM" | "HIGH";
+            /** Estimated Lost Intents */
+            estimated_lost_intents: number | null;
+            /** Explanation */
+            explanation: string;
+            /** Evidence Codes */
+            evidence_codes: string[];
+            /** Rank */
+            rank: number;
+        };
+        /**
+         * ScenarioResult
+         * @description Per-scenario evaluation outcome (prediction vs Ground Truth).
+         */
+        ScenarioResult: {
+            /** Scenario Kind */
+            scenario_kind: string;
+            /** Scenario Id */
+            scenario_id: string;
+            /** Diagnosis Status */
+            diagnosis_status: string;
+            /** Predicted Anomalous Stages */
+            predicted_anomalous_stages?: string[];
+            /** Expected Anomalous Stages */
+            expected_anomalous_stages?: string[];
+            /** Predicted Root Causes */
+            predicted_root_causes?: string[];
+            /** Expected Root Causes */
+            expected_root_causes?: string[];
+            /** Predicted Missing Data */
+            predicted_missing_data?: string[];
+            /** Expected Data Gaps */
+            expected_data_gaps?: string[];
+            /** Stage Exact */
+            stage_exact?: boolean | null;
+            /** Stage Overlap */
+            stage_overlap?: number | null;
+            /** Root Cause Precision */
+            root_cause_precision?: number | null;
+            /** Root Cause Recall */
+            root_cause_recall?: number | null;
+            /** Root Cause F1 */
+            root_cause_f1?: number | null;
+            /** Evidence Validity Rate */
+            evidence_validity_rate?: number | null;
+            /** Unsupported Claim Rate */
+            unsupported_claim_rate?: number | null;
+            /** Loss Attribution Abs Error */
+            loss_attribution_abs_error?: number | null;
+            /** Tool Call Count */
+            tool_call_count?: number | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /** Report Summary */
+            report_summary?: string | null;
+            /** Unexplained Lost Intents */
+            unexplained_lost_intents?: number | null;
+            /** Recommended Actions */
+            recommended_actions?: string[];
+            /** Evidence */
+            evidence?: Record<string, never>[];
+            /** Tool Trace */
+            tool_trace?: Record<string, never>[];
+            /** Badcases */
+            badcases?: ("STAGE_MISS" | "STAGE_FALSE_POSITIVE" | "ROOT_CAUSE_MISS" | "ROOT_CAUSE_FALSE_POSITIVE" | "UNSUPPORTED_CLAIM" | "LOSS_ATTRIBUTION_ERROR" | "RUN_FAILURE" | "DATA_GAP_MISS")[];
+        };
+        /**
+         * SimulatedIncidentCreate
+         * @description Request that the harness materialise one demo scenario as an Incident.
+         */
+        SimulatedIncidentCreate: {
+            /**
+             * Scenario Kind
+             * @default mixed_failure
+             */
+            scenario_kind: string;
+            /**
+             * Seed
+             * @default 42
+             */
+            seed: number;
+            /**
+             * Num Intents
+             * @default 500
+             */
+            num_intents: number;
+            /** Title */
+            title?: string | null;
+        };
+        /** ToolExecutionSchema */
+        ToolExecutionSchema: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Tool Call Id */
+            tool_call_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Status */
+            status: string;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Row Count */
+            row_count: number | null;
+            /** Artifact Id */
+            artifact_id: string | null;
+            /** Error Type */
+            error_type: string | null;
+            /** Error Message */
+            error_message: string | null;
+        };
+        /** ValidationError */
+        ValidationError: {
+            /** Location */
+            loc: (string | number)[];
+            /** Message */
+            msg: string;
+            /** Error Type */
+            type: string;
         };
     };
     responses: never;
@@ -163,7 +1292,606 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OntologyPlaceholder"];
+                    "application/json": components["schemas"]["OntologyRegistry"];
+                };
+            };
+        };
+    };
+    list_incidents_api_v1_incidents_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                status_filter?: string | null;
+                scenario_id?: string | null;
+                date_from?: string | null;
+                date_to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_incident_api_v1_incidents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_incident_api_v1_incidents__incident_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incident_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_simulated_incident_api_v1_incidents_simulated_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SimulatedIncidentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_incident_funnel_api_v1_incidents__incident_id__funnel_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incident_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FunnelResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_diagnosis_api_v1_incidents__incident_id__diagnosis_runs_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                incident_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosisRunTriggerResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_diagnosis_api_v1_incidents__incident_id__diagnosis_runs__run_id__retry_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                incident_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosisRunRetryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_diagnosis_run_api_v1_diagnosis_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosisRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_diagnosis_report_api_v1_diagnosis_runs__run_id__report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_diagnosis_trace_api_v1_diagnosis_runs__run_id__trace_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosisTraceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_diagnosis_events_api_v1_diagnosis_runs__run_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Last-Event-ID"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_evidence_api_v1_evidence__evidence_code__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evidence_code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvidenceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_download_url_api_v1_artifacts__artifact_id__download_url_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactDownloadResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_artifact_content_api_v1_artifacts__artifact_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_evaluations_api_v1_evaluation_runs_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluationRunListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_evaluation_api_v1_evaluation_runs_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvaluationRunCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluationRunTriggerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_evaluation_api_v1_evaluation_runs__evaluation_run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evaluation_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluationRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_evaluation_report_api_v1_evaluation_runs__evaluation_run_id__report_get: {
+        parameters: {
+            query?: {
+                format?: "json" | "markdown";
+            };
+            header?: never;
+            path: {
+                evaluation_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

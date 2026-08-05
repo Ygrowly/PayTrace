@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db.models import Incident
 from app.diagnosis.report import DiagnosisReport, RootCause
 from app.incidents import service
@@ -78,6 +80,15 @@ class TestIncidentService:
         items, total = service.list_incidents(db_session, status="RESOLVED")
         assert total == 1
         assert items[0].title == "resolved"
+
+    def test_list_incidents_filter_by_scenario(self, db_session: Session) -> None:
+        _make_incident(db_session, title="mixed", scenario_id="mixed_failure")
+        _make_incident(db_session, title="timeout", scenario_id="channel_timeout")
+
+        items, total = service.list_incidents(db_session, scenario_id="channel_timeout")
+
+        assert total == 1
+        assert items[0].title == "timeout"
 
     def test_get_incident_found_and_missing(self, db_session: Session) -> None:
         inc = _make_incident(db_session)
@@ -263,6 +274,30 @@ class TestIncidentAPI:
         resp = await client.get(f"/api/v1/incidents/{fake_id}")
         assert resp.status_code == 404
 
+    async def test_create_simulated_incident_materialises_dataset_and_funnel(
+        self, client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scenario_root = tmp_path / "scenarios"
+        monkeypatch.setattr(get_settings(), "scenario_root", str(scenario_root))
+
+        create = await client.post(
+            "/api/v1/incidents/simulated",
+            json={"scenario_kind": "mixed_failure", "seed": 42, "num_intents": 20},
+        )
+
+        assert create.status_code == 201
+        body = create.json()
+        assert body["scenario_id"] == "mixed_failure"
+        assert Path(body["dataset_ref"]).exists()
+        assert (scenario_root / "ground_truth" / "mixed_failure.ground_truth.json").exists()
+
+        funnel = await client.get(f"/api/v1/incidents/{body['id']}/funnel")
+        assert funnel.status_code == 200
+        funnel_body = funnel.json()
+        assert funnel_body["baseline"]["order_confirmed_count"] > 0
+        assert funnel_body["incident"]["order_confirmed_count"] > 0
+        assert funnel_body["anomalous_stages"]
+
 
 class TestDiagnosisAPI:
     async def test_trigger_diagnosis_returns_202(self, client: AsyncClient) -> None:
@@ -353,6 +388,58 @@ class TestDiagnosisAPI:
         fake_id = str(uuid.uuid4())
         resp = await client.get(f"/api/v1/diagnosis-runs/{fake_id}")
         assert resp.status_code == 404
+
+    async def test_events_replay_from_last_event_and_trace_is_available(
+        self, client: AsyncClient, db_session: Session
+    ) -> None:
+        create_resp = await client.post("/api/v1/incidents", json=_incident_payload())
+        inc_id = create_resp.json()["id"]
+
+        with patch("app.api.v1.incidents.run_diagnosis.delay") as mock_delay:
+            mock_delay.return_value.id = "task-events"
+            trigger = await client.post(
+                f"/api/v1/incidents/{inc_id}/diagnosis-runs",
+                headers={"Idempotency-Key": "ik-events-001"},
+            )
+
+        run_id = trigger.json()["diagnosis_run_id"]
+        run = service.get_run(db_session, uuid.UUID(run_id))
+        assert run is not None
+        service.update_run_status(db_session, run, "RUNNING")
+        service.write_event(
+            db_session,
+            diagnosis_run_id=run.id,
+            event_type="run_started",
+            stage="RUNNING",
+            message="Started",
+        )
+        service.update_run_status(db_session, run, "FAILED")
+        service.write_event(
+            db_session,
+            diagnosis_run_id=run.id,
+            event_type="run_failed",
+            stage="FAILED",
+            message="Failed",
+        )
+        db_session.commit()
+
+        events = await client.get(
+            f"/api/v1/diagnosis-runs/{run_id}/events",
+            headers={"Last-Event-ID": "1"},
+        )
+        assert events.status_code == 200
+        assert events.headers["content-type"].startswith("text/event-stream")
+        assert "event: run_started" in events.text
+        assert "event: run_failed" in events.text
+        assert "event: run_queued" not in events.text
+
+        trace = await client.get(f"/api/v1/diagnosis-runs/{run_id}/trace")
+        assert trace.status_code == 200
+        assert [event["event_type"] for event in trace.json()["events"]] == [
+            "run_queued",
+            "run_started",
+            "run_failed",
+        ]
 
 
 class TestReportAPI:

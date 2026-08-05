@@ -53,6 +53,7 @@
           "ontology"
         ],
         "summary": "Get Ontology",
+        "description": "Return the full v1 Ontology registry (objects, links, metrics,\ndimensions, actions, evidence types).",
         "operationId": "get_ontology_api_v1_ontology_get",
         "responses": {
           "200": {
@@ -60,7 +61,966 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OntologyPlaceholder"
+                  "$ref": "#/components/schemas/OntologyRegistry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents": {
+      "post": {
+        "tags": [
+          "incidents",
+          "incidents"
+        ],
+        "summary": "Create Incident",
+        "operationId": "create_incident_api_v1_incidents_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncidentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "incidents",
+          "incidents"
+        ],
+        "summary": "List Incidents",
+        "operationId": "list_incidents_api_v1_incidents_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "status_filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status Filter"
+            }
+          },
+          {
+            "name": "scenario_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scenario Id"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}": {
+      "get": {
+        "tags": [
+          "incidents",
+          "incidents"
+        ],
+        "summary": "Get Incident",
+        "operationId": "get_incident_api_v1_incidents__incident_id__get",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Incident Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/simulated": {
+      "post": {
+        "tags": [
+          "incidents",
+          "incidents"
+        ],
+        "summary": "Create Simulated Incident",
+        "description": "Materialise a deterministic harness scenario and create its Incident.",
+        "operationId": "create_simulated_incident_api_v1_incidents_simulated_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulatedIncidentCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}/funnel": {
+      "get": {
+        "tags": [
+          "incidents",
+          "incidents"
+        ],
+        "summary": "Get Incident Funnel",
+        "operationId": "get_incident_funnel_api_v1_incidents__incident_id__funnel_get",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Incident Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FunnelResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}/diagnosis-runs": {
+      "post": {
+        "tags": [
+          "incidents",
+          "incidents"
+        ],
+        "summary": "Trigger Diagnosis",
+        "description": "Trigger an async diagnosis run for an incident.\n\nRequires ``Idempotency-Key`` header per plan \u00a7 17.1.  Returns 202\nwith the DiagnosisRun ID immediately; the actual work happens in a\nCelery worker.",
+        "operationId": "trigger_diagnosis_api_v1_incidents__incident_id__diagnosis_runs_post",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Incident Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisRunTriggerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/incidents/{incident_id}/diagnosis-runs/{run_id}/retry": {
+      "post": {
+        "tags": [
+          "incidents",
+          "incidents"
+        ],
+        "summary": "Retry Diagnosis",
+        "description": "Retry a failed diagnosis run.\n\nCreates a new DiagnosisRun with a new idempotency key and dispatches\na fresh Celery task.  The original run is left as-is.",
+        "operationId": "retry_diagnosis_api_v1_incidents__incident_id__diagnosis_runs__run_id__retry_post",
+        "parameters": [
+          {
+            "name": "incident_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Incident Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisRunRetryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnosis-runs/{run_id}": {
+      "get": {
+        "tags": [
+          "diagnosis",
+          "diagnosis"
+        ],
+        "summary": "Get Diagnosis Run",
+        "operationId": "get_diagnosis_run_api_v1_diagnosis_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnosis-runs/{run_id}/report": {
+      "get": {
+        "tags": [
+          "diagnosis",
+          "diagnosis"
+        ],
+        "summary": "Get Diagnosis Report",
+        "operationId": "get_diagnosis_report_api_v1_diagnosis_runs__run_id__report_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnosis-runs/{run_id}/trace": {
+      "get": {
+        "tags": [
+          "diagnosis",
+          "diagnosis"
+        ],
+        "summary": "Get Diagnosis Trace",
+        "operationId": "get_diagnosis_trace_api_v1_diagnosis_runs__run_id__trace_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosisTraceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/diagnosis-runs/{run_id}/events": {
+      "get": {
+        "tags": [
+          "diagnosis",
+          "diagnosis"
+        ],
+        "summary": "Stream Diagnosis Events",
+        "description": "Replay persisted run events and follow them briefly over SSE.\n\nThe database event log is the source of truth. A reconnect starts after\n``Last-Event-ID`` and therefore cannot lose events already committed by a\nworker. The stream ends after a terminal event or a bounded idle window;\nclients can reconnect with the last sequence number.",
+        "operationId": "stream_diagnosis_events_api_v1_diagnosis_runs__run_id__events_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evidence/{evidence_code}": {
+      "get": {
+        "tags": [
+          "evidence",
+          "evidence"
+        ],
+        "summary": "Get Evidence",
+        "operationId": "get_evidence_api_v1_evidence__evidence_code__get",
+        "parameters": [
+          {
+            "name": "evidence_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Evidence Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}/download-url": {
+      "get": {
+        "tags": [
+          "artifacts",
+          "artifacts"
+        ],
+        "summary": "Get Artifact Download Url",
+        "operationId": "get_artifact_download_url_api_v1_artifacts__artifact_id__download_url_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDownloadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/artifacts/{artifact_id}/content": {
+      "get": {
+        "tags": [
+          "artifacts",
+          "artifacts"
+        ],
+        "summary": "Get Artifact Content",
+        "operationId": "get_artifact_content_api_v1_artifacts__artifact_id__content_get",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evaluation-runs": {
+      "post": {
+        "tags": [
+          "evaluations",
+          "evaluations"
+        ],
+        "summary": "Create Evaluation",
+        "operationId": "create_evaluation_api_v1_evaluation_runs_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluationRunCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationRunTriggerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "evaluations",
+          "evaluations"
+        ],
+        "summary": "List Evaluations",
+        "operationId": "list_evaluations_api_v1_evaluation_runs_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationRunListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evaluation-runs/{evaluation_run_id}": {
+      "get": {
+        "tags": [
+          "evaluations",
+          "evaluations"
+        ],
+        "summary": "Get Evaluation",
+        "operationId": "get_evaluation_api_v1_evaluation_runs__evaluation_run_id__get",
+        "parameters": [
+          {
+            "name": "evaluation_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Evaluation Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evaluation-runs/{evaluation_run_id}/report": {
+      "get": {
+        "tags": [
+          "evaluations",
+          "evaluations"
+        ],
+        "summary": "Download Evaluation Report",
+        "operationId": "download_evaluation_report_api_v1_evaluation_runs__evaluation_run_id__report_get",
+        "parameters": [
+          {
+            "name": "evaluation_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Evaluation Run Id"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "json",
+                "markdown"
+              ],
+              "type": "string",
+              "default": "json",
+              "title": "Format"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -71,6 +1031,209 @@
   },
   "components": {
     "schemas": {
+      "ActionDefinition": {
+        "properties": {
+          "action_type": {
+            "$ref": "#/components/schemas/ActionType"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "exposed_to_frontend": {
+            "type": "boolean",
+            "title": "Exposed To Frontend"
+          },
+          "ontology_version": {
+            "type": "string",
+            "enum": [
+              "paytrace.ontology.v1"
+            ],
+            "const": "paytrace.ontology.v1",
+            "title": "Ontology Version",
+            "default": "paytrace.ontology.v1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action_type",
+          "description",
+          "exposed_to_frontend"
+        ],
+        "title": "ActionDefinition"
+      },
+      "ActionType": {
+        "type": "string",
+        "enum": [
+          "CreateIncident",
+          "RunDiagnosis",
+          "RetryDiagnosis",
+          "RequestData",
+          "AcceptCause",
+          "RejectCause",
+          "ResolveIncident"
+        ],
+        "title": "ActionType"
+      },
+      "AggregateMetrics": {
+        "properties": {
+          "scenario_count": {
+            "type": "integer",
+            "title": "Scenario Count"
+          },
+          "succeeded_count": {
+            "type": "integer",
+            "title": "Succeeded Count"
+          },
+          "run_success_rate": {
+            "type": "number",
+            "title": "Run Success Rate"
+          },
+          "stage_localization_exact_rate": {
+            "type": "number",
+            "title": "Stage Localization Exact Rate"
+          },
+          "stage_localization_overlap_mean": {
+            "type": "number",
+            "title": "Stage Localization Overlap Mean"
+          },
+          "root_cause_precision_mean": {
+            "type": "number",
+            "title": "Root Cause Precision Mean"
+          },
+          "root_cause_recall_mean": {
+            "type": "number",
+            "title": "Root Cause Recall Mean"
+          },
+          "root_cause_f1_mean": {
+            "type": "number",
+            "title": "Root Cause F1 Mean"
+          },
+          "evidence_validity_rate_mean": {
+            "type": "number",
+            "title": "Evidence Validity Rate Mean"
+          },
+          "unsupported_claim_rate_mean": {
+            "type": "number",
+            "title": "Unsupported Claim Rate Mean"
+          },
+          "loss_attribution_mae": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loss Attribution Mae"
+          },
+          "tool_call_count_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Count Mean"
+          },
+          "latency_ms_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms Mean"
+          },
+          "badcase_count": {
+            "type": "integer",
+            "title": "Badcase Count"
+          },
+          "total_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Input Tokens"
+          },
+          "total_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Output Tokens"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_count",
+          "succeeded_count",
+          "run_success_rate",
+          "stage_localization_exact_rate",
+          "stage_localization_overlap_mean",
+          "root_cause_precision_mean",
+          "root_cause_recall_mean",
+          "root_cause_f1_mean",
+          "evidence_validity_rate_mean",
+          "unsupported_claim_rate_mean",
+          "badcase_count"
+        ],
+        "title": "AggregateMetrics",
+        "description": "Summary metrics across all scenarios in one EvaluationRun (\u00a7 20.2)."
+      },
+      "ArtifactDownloadResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Artifact Id"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "expires_seconds": {
+            "type": "integer",
+            "title": "Expires Seconds"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "url",
+          "expires_seconds",
+          "content_type"
+        ],
+        "title": "ArtifactDownloadResponse"
+      },
       "DependencyStatus": {
         "properties": {
           "status": {
@@ -110,6 +1273,1331 @@
         ],
         "title": "DependencyStatus"
       },
+      "DiagnosisRunEventSchema": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sequence",
+          "event_type",
+          "stage",
+          "message",
+          "payload",
+          "created_at"
+        ],
+        "title": "DiagnosisRunEventSchema"
+      },
+      "DiagnosisRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "incident_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Incident Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "model_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Provider"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "ontology_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ontology Version"
+          },
+          "attempt_number": {
+            "type": "integer",
+            "title": "Attempt Number"
+          },
+          "celery_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Celery Task Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "total_duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Duration Ms"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "incident_id",
+          "idempotency_key",
+          "status",
+          "model_provider",
+          "model_name",
+          "prompt_version",
+          "ontology_version",
+          "attempt_number",
+          "celery_task_id",
+          "started_at",
+          "finished_at",
+          "error_type",
+          "error_message",
+          "total_duration_ms",
+          "input_tokens",
+          "output_tokens",
+          "estimated_cost",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DiagnosisRunResponse",
+        "description": "GET /diagnosis-runs/{id} response \u2014 run status only, no report payload."
+      },
+      "DiagnosisRunRetryResponse": {
+        "properties": {
+          "new_diagnosis_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "New Diagnosis Run Id"
+          },
+          "original_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Original Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_diagnosis_run_id",
+          "original_run_id",
+          "status",
+          "message"
+        ],
+        "title": "DiagnosisRunRetryResponse",
+        "description": "202 response for POST /incidents/{id}/diagnosis-runs/{run_id}/retry."
+      },
+      "DiagnosisRunTriggerResponse": {
+        "properties": {
+          "diagnosis_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Diagnosis Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "diagnosis_run_id",
+          "status",
+          "message"
+        ],
+        "title": "DiagnosisRunTriggerResponse",
+        "description": "202 response for POST /incidents/{id}/diagnosis-runs."
+      },
+      "DiagnosisTraceResponse": {
+        "properties": {
+          "diagnosis_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Diagnosis Run Id"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DiagnosisRunEventSchema"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "tool_executions": {
+            "items": {
+              "$ref": "#/components/schemas/ToolExecutionSchema"
+            },
+            "type": "array",
+            "title": "Tool Executions"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceResponse"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "diagnosis_run_id",
+          "events",
+          "tool_executions",
+          "evidence"
+        ],
+        "title": "DiagnosisTraceResponse"
+      },
+      "DimensionDefinition": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "ontology_version": {
+            "type": "string",
+            "enum": [
+              "paytrace.ontology.v1"
+            ],
+            "const": "paytrace.ontology.v1",
+            "title": "Ontology Version",
+            "default": "paytrace.ontology.v1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "title": "DimensionDefinition"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Machine-readable error code, e.g. INVALID_IDEMPOTENCY_KEY"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable error description"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Optional detail list"
+          },
+          "trace_id": {
+            "type": "string",
+            "title": "Trace Id",
+            "description": "Request trace id for correlation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "trace_id"
+        ],
+        "title": "ErrorResponse",
+        "description": "Unified error shape per plan \u00a7 18.6."
+      },
+      "EvaluationRunCreate": {
+        "properties": {
+          "model_mode": {
+            "type": "string",
+            "enum": [
+              "B0"
+            ],
+            "const": "B0",
+            "title": "Model Mode",
+            "default": "B0"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version",
+            "default": "rule-based.v1"
+          },
+          "scenario_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Scenario Kinds"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "default": 42
+          },
+          "num_intents": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Num Intents",
+            "default": 500
+          }
+        },
+        "type": "object",
+        "title": "EvaluationRunCreate"
+      },
+      "EvaluationRunListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationRunResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "EvaluationRunListResponse"
+      },
+      "EvaluationRunResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "title": "Idempotency Key"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "model_mode": {
+            "type": "string",
+            "title": "Model Mode"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "ontology_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ontology Version"
+          },
+          "scenario_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scenario Kinds"
+          },
+          "scenario_count": {
+            "type": "integer",
+            "title": "Scenario Count"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed"
+          },
+          "num_intents": {
+            "type": "integer",
+            "title": "Num Intents"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AggregateMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scenario_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ScenarioResult"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scenario Results"
+          },
+          "badcases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Badcases"
+          },
+          "report_json_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Json Key"
+          },
+          "report_markdown_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Markdown Key"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "celery_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Celery Task Id"
+          },
+          "total_duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Duration Ms"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "idempotency_key",
+          "status",
+          "model_mode",
+          "model_name",
+          "prompt_version",
+          "ontology_version",
+          "scenario_kinds",
+          "scenario_count",
+          "seed",
+          "num_intents",
+          "metrics",
+          "scenario_results",
+          "badcases",
+          "report_json_key",
+          "report_markdown_key",
+          "error_type",
+          "error_message",
+          "celery_task_id",
+          "total_duration_ms",
+          "created_at",
+          "updated_at",
+          "started_at",
+          "finished_at"
+        ],
+        "title": "EvaluationRunResponse"
+      },
+      "EvaluationRunTriggerResponse": {
+        "properties": {
+          "evaluation_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Evaluation Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "evaluation_run_id",
+          "status",
+          "message"
+        ],
+        "title": "EvaluationRunTriggerResponse"
+      },
+      "EvidenceResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "evidence_code": {
+            "type": "string",
+            "title": "Evidence Code"
+          },
+          "tool_execution_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tool Execution Id"
+          },
+          "evidence_type": {
+            "type": "string",
+            "title": "Evidence Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metrics"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filters"
+          },
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "evidence_code",
+          "tool_execution_id",
+          "evidence_type",
+          "title",
+          "summary",
+          "metrics",
+          "filters",
+          "artifact_id",
+          "created_at"
+        ],
+        "title": "EvidenceResponse"
+      },
+      "EvidenceType": {
+        "type": "string",
+        "enum": [
+          "FUNNEL_STAGE_DEGRADATION",
+          "DIMENSION_CONTRIBUTION",
+          "BENEFIT_GAP_FRICTION",
+          "CHANNEL_TIMEOUT",
+          "ERROR_CODE_CONCENTRATION",
+          "DATA_GAP"
+        ],
+        "title": "EvidenceType",
+        "description": "Kinds of deterministic evidence a tool may produce."
+      },
+      "EvidenceTypeDefinition": {
+        "properties": {
+          "evidence_type": {
+            "$ref": "#/components/schemas/EvidenceType"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "ontology_version": {
+            "type": "string",
+            "enum": [
+              "paytrace.ontology.v1"
+            ],
+            "const": "paytrace.ontology.v1",
+            "title": "Ontology Version",
+            "default": "paytrace.ontology.v1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "evidence_type",
+          "description"
+        ],
+        "title": "EvidenceTypeDefinition"
+      },
+      "FunnelPeriodStats": {
+        "properties": {
+          "period": {
+            "type": "string",
+            "enum": [
+              "baseline",
+              "incident"
+            ],
+            "title": "Period"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/FunnelStageStat"
+            },
+            "type": "array",
+            "title": "Stages"
+          },
+          "order_confirmed_count": {
+            "type": "integer",
+            "title": "Order Confirmed Count"
+          },
+          "completed_count": {
+            "type": "integer",
+            "title": "Completed Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period",
+          "stages",
+          "order_confirmed_count",
+          "completed_count"
+        ],
+        "title": "FunnelPeriodStats"
+      },
+      "FunnelResult": {
+        "properties": {
+          "baseline": {
+            "$ref": "#/components/schemas/FunnelPeriodStats"
+          },
+          "incident": {
+            "$ref": "#/components/schemas/FunnelPeriodStats"
+          },
+          "deltas": {
+            "items": {
+              "$ref": "#/components/schemas/FunnelStageDelta"
+            },
+            "type": "array",
+            "title": "Deltas"
+          },
+          "anomalous_stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Anomalous Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "baseline",
+          "incident",
+          "deltas",
+          "anomalous_stages"
+        ],
+        "title": "FunnelResult"
+      },
+      "FunnelStageDelta": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "baseline_overall_rate": {
+            "type": "number",
+            "title": "Baseline Overall Rate"
+          },
+          "incident_overall_rate": {
+            "type": "number",
+            "title": "Incident Overall Rate"
+          },
+          "rate_delta": {
+            "type": "number",
+            "title": "Rate Delta"
+          },
+          "estimated_lost_intents": {
+            "type": "integer",
+            "title": "Estimated Lost Intents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "baseline_overall_rate",
+          "incident_overall_rate",
+          "rate_delta",
+          "estimated_lost_intents"
+        ],
+        "title": "FunnelStageDelta"
+      },
+      "FunnelStageStat": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "reached_count": {
+            "type": "integer",
+            "title": "Reached Count"
+          },
+          "step_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Rate"
+          },
+          "overall_rate": {
+            "type": "number",
+            "title": "Overall Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "reached_count",
+          "step_rate",
+          "overall_rate"
+        ],
+        "title": "FunnelStageStat"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "IncidentCreate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "scenario_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Scenario Id"
+          },
+          "dataset_ref": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Dataset Ref"
+          },
+          "baseline_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Baseline Start"
+          },
+          "baseline_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Baseline End"
+          },
+          "incident_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Incident Start"
+          },
+          "incident_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Incident End"
+          },
+          "trigger_metric": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Trigger Metric"
+          },
+          "baseline_value": {
+            "type": "number",
+            "title": "Baseline Value"
+          },
+          "observed_value": {
+            "type": "number",
+            "title": "Observed Value"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 10000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "ontology_version": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Ontology Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "scenario_id",
+          "dataset_ref",
+          "baseline_start",
+          "baseline_end",
+          "incident_start",
+          "incident_end",
+          "trigger_metric",
+          "baseline_value",
+          "observed_value",
+          "ontology_version"
+        ],
+        "title": "IncidentCreate",
+        "description": "POST /incidents request body."
+      },
+      "IncidentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationMeta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "pagination"
+        ],
+        "title": "IncidentListResponse"
+      },
+      "IncidentResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "dataset_ref": {
+            "type": "string",
+            "title": "Dataset Ref"
+          },
+          "baseline_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Baseline Start"
+          },
+          "baseline_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Baseline End"
+          },
+          "incident_start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Incident Start"
+          },
+          "incident_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Incident End"
+          },
+          "trigger_metric": {
+            "type": "string",
+            "title": "Trigger Metric"
+          },
+          "baseline_value": {
+            "type": "number",
+            "title": "Baseline Value"
+          },
+          "observed_value": {
+            "type": "number",
+            "title": "Observed Value"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "ontology_version": {
+            "type": "string",
+            "title": "Ontology Version"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "latest_diagnosis_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Diagnosis Run Id"
+          },
+          "latest_diagnosis_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Diagnosis Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "scenario_id",
+          "dataset_ref",
+          "baseline_start",
+          "baseline_end",
+          "incident_start",
+          "incident_end",
+          "trigger_metric",
+          "baseline_value",
+          "observed_value",
+          "status",
+          "ontology_version",
+          "description",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IncidentResponse",
+        "description": "GET /incidents, GET /incidents/{id} response."
+      },
+      "LinkDefinition": {
+        "properties": {
+          "link_type": {
+            "$ref": "#/components/schemas/LinkType"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ObjectType"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ObjectType"
+          },
+          "ontology_version": {
+            "type": "string",
+            "enum": [
+              "paytrace.ontology.v1"
+            ],
+            "const": "paytrace.ontology.v1",
+            "title": "Ontology Version",
+            "default": "paytrace.ontology.v1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "link_type",
+          "source",
+          "target"
+        ],
+        "title": "LinkDefinition"
+      },
+      "LinkType": {
+        "type": "string",
+        "enum": [
+          "contains",
+          "opens",
+          "creates",
+          "uses",
+          "routed_to",
+          "affects",
+          "supported_by",
+          "evaluates"
+        ],
+        "title": "LinkType"
+      },
       "LivenessResponse": {
         "properties": {
           "status": {
@@ -127,23 +2615,178 @@
         ],
         "title": "LivenessResponse"
       },
-      "OntologyPlaceholder": {
+      "MetricDefinition": {
         "properties": {
-          "version": {
+          "name": {
             "type": "string",
-            "title": "Version"
+            "title": "Name"
           },
-          "note": {
+          "description": {
             "type": "string",
-            "title": "Note"
+            "title": "Description"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "ontology_version": {
+            "type": "string",
+            "enum": [
+              "paytrace.ontology.v1"
+            ],
+            "const": "paytrace.ontology.v1",
+            "title": "Ontology Version",
+            "default": "paytrace.ontology.v1"
           }
         },
         "type": "object",
         "required": [
-          "version",
-          "note"
+          "name",
+          "description",
+          "unit"
         ],
-        "title": "OntologyPlaceholder"
+        "title": "MetricDefinition"
+      },
+      "ObjectDefinition": {
+        "properties": {
+          "object_type": {
+            "$ref": "#/components/schemas/ObjectType"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "ontology_version": {
+            "type": "string",
+            "enum": [
+              "paytrace.ontology.v1"
+            ],
+            "const": "paytrace.ontology.v1",
+            "title": "Ontology Version",
+            "default": "paytrace.ontology.v1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "object_type",
+          "description"
+        ],
+        "title": "ObjectDefinition"
+      },
+      "ObjectType": {
+        "type": "string",
+        "enum": [
+          "PurchaseIntent",
+          "Order",
+          "CheckoutSession",
+          "PaymentAttempt",
+          "PaymentMethod",
+          "Benefit",
+          "PaymentChannel",
+          "PaymentEvent",
+          "Incident",
+          "DiagnosisRun",
+          "Evidence",
+          "DiagnosisReport",
+          "EvaluationRun"
+        ],
+        "title": "ObjectType"
+      },
+      "OntologyRegistry": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "paytrace.ontology.v1"
+            ],
+            "const": "paytrace.ontology.v1",
+            "title": "Version",
+            "default": "paytrace.ontology.v1"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectDefinition"
+            },
+            "type": "array",
+            "title": "Objects"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/LinkDefinition"
+            },
+            "type": "array",
+            "title": "Links"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDefinition"
+            },
+            "type": "array",
+            "title": "Metrics"
+          },
+          "dimensions": {
+            "items": {
+              "$ref": "#/components/schemas/DimensionDefinition"
+            },
+            "type": "array",
+            "title": "Dimensions"
+          },
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/ActionDefinition"
+            },
+            "type": "array",
+            "title": "Actions"
+          },
+          "evidence_types": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceTypeDefinition"
+            },
+            "type": "array",
+            "title": "Evidence Types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "objects",
+          "links",
+          "metrics",
+          "dimensions",
+          "actions",
+          "evidence_types"
+        ],
+        "title": "OntologyRegistry",
+        "description": "Immutable v1 registry. Validated at construction; no runtime mutation."
+      },
+      "PaginationMeta": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Page",
+            "description": "Current page (1-based)"
+          },
+          "page_size": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Page Size",
+            "description": "Items per page"
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total",
+            "description": "Total matching items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "page_size",
+          "total"
+        ],
+        "title": "PaginationMeta"
       },
       "ReadinessResponse": {
         "properties": {
@@ -169,6 +2812,561 @@
           "dependencies"
         ],
         "title": "ReadinessResponse"
+      },
+      "ReportResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "diagnosis_run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Diagnosis Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "total_estimated_lost_intents": {
+            "type": "integer",
+            "title": "Total Estimated Lost Intents"
+          },
+          "explained_lost_intents": {
+            "type": "integer",
+            "title": "Explained Lost Intents"
+          },
+          "unexplained_lost_intents": {
+            "type": "integer",
+            "title": "Unexplained Lost Intents"
+          },
+          "missing_data": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Data"
+          },
+          "recommended_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recommended Actions"
+          },
+          "root_causes": {
+            "items": {
+              "$ref": "#/components/schemas/RootCauseSchema"
+            },
+            "type": "array",
+            "title": "Root Causes"
+          },
+          "ontology_version": {
+            "type": "string",
+            "title": "Ontology Version"
+          },
+          "validator_version": {
+            "type": "string",
+            "title": "Validator Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "alternative_explanations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Alternative Explanations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "diagnosis_run_id",
+          "status",
+          "summary",
+          "total_estimated_lost_intents",
+          "explained_lost_intents",
+          "unexplained_lost_intents",
+          "missing_data",
+          "recommended_actions",
+          "root_causes",
+          "ontology_version",
+          "validator_version",
+          "created_at"
+        ],
+        "title": "ReportResponse",
+        "description": "GET /diagnosis-runs/{id}/report response."
+      },
+      "RootCauseSchema": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH"
+            ],
+            "title": "Confidence"
+          },
+          "estimated_lost_intents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Lost Intents"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation"
+          },
+          "evidence_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidence Codes"
+          },
+          "rank": {
+            "type": "integer",
+            "title": "Rank"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "category",
+          "confidence",
+          "estimated_lost_intents",
+          "explanation",
+          "evidence_codes",
+          "rank"
+        ],
+        "title": "RootCauseSchema"
+      },
+      "ScenarioResult": {
+        "properties": {
+          "scenario_kind": {
+            "type": "string",
+            "title": "Scenario Kind"
+          },
+          "scenario_id": {
+            "type": "string",
+            "title": "Scenario Id"
+          },
+          "diagnosis_status": {
+            "type": "string",
+            "title": "Diagnosis Status"
+          },
+          "predicted_anomalous_stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Predicted Anomalous Stages"
+          },
+          "expected_anomalous_stages": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Expected Anomalous Stages"
+          },
+          "predicted_root_causes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Predicted Root Causes"
+          },
+          "expected_root_causes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Expected Root Causes"
+          },
+          "predicted_missing_data": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Predicted Missing Data"
+          },
+          "expected_data_gaps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Expected Data Gaps"
+          },
+          "stage_exact": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Exact"
+          },
+          "stage_overlap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Overlap"
+          },
+          "root_cause_precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Cause Precision"
+          },
+          "root_cause_recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Cause Recall"
+          },
+          "root_cause_f1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Cause F1"
+          },
+          "evidence_validity_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Validity Rate"
+          },
+          "unsupported_claim_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unsupported Claim Rate"
+          },
+          "loss_attribution_abs_error": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loss Attribution Abs Error"
+          },
+          "tool_call_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Count"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "report_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Report Summary"
+          },
+          "unexplained_lost_intents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unexplained Lost Intents"
+          },
+          "recommended_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recommended Actions"
+          },
+          "evidence": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "tool_trace": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tool Trace"
+          },
+          "badcases": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "STAGE_MISS",
+                "STAGE_FALSE_POSITIVE",
+                "ROOT_CAUSE_MISS",
+                "ROOT_CAUSE_FALSE_POSITIVE",
+                "UNSUPPORTED_CLAIM",
+                "LOSS_ATTRIBUTION_ERROR",
+                "RUN_FAILURE",
+                "DATA_GAP_MISS"
+              ]
+            },
+            "type": "array",
+            "title": "Badcases"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario_kind",
+          "scenario_id",
+          "diagnosis_status"
+        ],
+        "title": "ScenarioResult",
+        "description": "Per-scenario evaluation outcome (prediction vs Ground Truth)."
+      },
+      "SimulatedIncidentCreate": {
+        "properties": {
+          "scenario_kind": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Scenario Kind",
+            "default": "mixed_failure"
+          },
+          "seed": {
+            "type": "integer",
+            "title": "Seed",
+            "default": 42
+          },
+          "num_intents": {
+            "type": "integer",
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Num Intents",
+            "default": 500
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "title": "SimulatedIncidentCreate",
+        "description": "Request that the harness materialise one demo scenario as an Incident."
+      },
+      "ToolExecutionSchema": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "tool_call_id": {
+            "type": "string",
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tool_call_id",
+          "tool_name",
+          "status",
+          "duration_ms",
+          "row_count",
+          "artifact_id",
+          "error_type",
+          "error_message"
+        ],
+        "title": "ToolExecutionSchema"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
       }
     }
   }

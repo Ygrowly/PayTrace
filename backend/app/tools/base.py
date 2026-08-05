@@ -165,14 +165,19 @@ class Evidence(BaseModel):
 class EvidenceLedger:
     """Assigns unique evidence_code to system Evidence. Model never creates these."""
 
-    def __init__(self) -> None:
+    def __init__(self, prefix: str = "") -> None:
         self._items: list[Evidence] = []
         self._counter = 0
+        self._prefix = prefix.strip("-")[:16]
 
     def record(self, draft: EvidenceDraft, tool_name: str, tool_call_id: str) -> Evidence:
         self._counter += 1
         ev = Evidence(
-            evidence_code=f"EV-{self._counter:03d}",
+            evidence_code=(
+                f"EV-{self._prefix}-{self._counter:03d}"
+                if self._prefix
+                else f"EV-{self._counter:03d}"
+            ),
             evidence_type=draft.evidence_type,
             summary=draft.summary,
             metrics=draft.metrics,

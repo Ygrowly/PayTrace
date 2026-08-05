@@ -1,7 +1,6 @@
 # PayTrace Makefile.
 #
-# M0a: skeleton + infra.
-# M0b: real backend / frontend / migration / OpenAPI targets.
+# M3: real evaluation runner, API, frontend and report artifacts.
 
 .PHONY: help infra-up infra-down migrate \
         run-api run-worker run-web \
@@ -82,10 +81,10 @@ test: backend-test frontend-test
 
 # --- Placeholders (later milestones) ---------------------------------------
 generate-scenarios:
-	@echo "[placeholder] Scenario generator arrives in M1."
+	cd backend && uv run python scripts/generate_scenarios.py
 
 evaluate-rule-based:
-	@echo "[placeholder] Evaluation runner arrives in M3."
+	cd backend && uv run python scripts/evaluate_rule_based.py
 
 e2e:
 	@echo "[placeholder] Playwright E2E arrives in M3/M4."

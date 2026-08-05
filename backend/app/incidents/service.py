@@ -5,6 +5,8 @@ persistence, and run-event logging.  All database access is synchronous
 (SQLAlchemy sync engine) per the project's Windows compatibility constraint.
 """
 
+import hashlib
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -14,12 +16,16 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    ArtifactRecord,
     DiagnosisReportRecord,
     DiagnosisRun,
     DiagnosisRunEvent,
+    EvidenceRecord,
     Incident,
     RootCauseFinding,
+    ToolExecution,
 )
+from app.diagnosis.orchestrator import DiagnosisExecution
 from app.diagnosis.report import DiagnosisReport
 
 logger = logging.getLogger(__name__)
@@ -71,6 +77,7 @@ def list_incidents(
     page: int = 1,
     page_size: int = 20,
     status: str | None = None,
+    scenario_id: str | None = None,
     date_from: datetime | None = None,
     date_to: datetime | None = None,
 ) -> tuple[list[Incident], int]:
@@ -78,6 +85,8 @@ def list_incidents(
     query = db.query(Incident)
     if status:
         query = query.filter(Incident.status == status)
+    if scenario_id:
+        query = query.filter(Incident.scenario_id == scenario_id)
     if date_from:
         query = query.filter(Incident.created_at >= date_from)
     if date_to:
@@ -288,3 +297,115 @@ def get_report(
         .all()
     )
     return record, findings
+
+
+def persist_execution_trace(
+    db: Session, *, run_id: uuid.UUID, execution: DiagnosisExecution
+) -> None:
+    """Persist tool/evidence trace produced by the fixed workflow.
+
+    The dataset path is deliberately not stored in ``input_summary``. The
+    trace needs enough information for the UI to locate a tool call while
+    avoiding raw paths and large result payloads in PostgreSQL.
+    """
+    evidence_by_call: dict[str, list] = {}
+    for evidence in execution.ledger.all():
+        evidence_by_call.setdefault(evidence.tool_call_id, []).append(evidence)
+
+    for result in execution.tool_results:
+        input_hash = hashlib.sha256(
+            json.dumps(
+                {"tool": result.tool_name, "tool_call_id": result.tool_call_id},
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        artifact_id = None
+        if result.artifact_ref is not None:
+            artifact = ArtifactRecord(
+                id=uuid.uuid4(),
+                diagnosis_run_id=run_id,
+                artifact_type="tool_result",
+                storage_key=result.artifact_ref.key,
+                content_type=result.artifact_ref.content_type,
+                size_bytes=result.artifact_ref.size_bytes,
+                checksum=result.artifact_ref.checksum_sha256,
+            )
+            db.add(artifact)
+            db.flush()
+            artifact_id = artifact.id
+
+        tool_execution = ToolExecution(
+            id=uuid.uuid4(),
+            diagnosis_run_id=run_id,
+            tool_call_id=result.tool_call_id,
+            tool_name=result.tool_name,
+            input_hash=input_hash,
+            input_summary={"tool_call_id": result.tool_call_id},
+            status=result.status.upper(),
+            duration_ms=result.duration_ms,
+            row_count=result.row_count,
+            artifact_id=artifact_id,
+            error_type=None if result.status != "failed" else "TOOL_FAILED",
+            error_message="; ".join(result.warnings)[:2048] if result.status == "failed" else None,
+        )
+        db.add(tool_execution)
+        db.flush()
+
+        call_evidence = evidence_by_call.get(result.tool_call_id, [])
+        for evidence in call_evidence:
+            db.add(
+                EvidenceRecord(
+                    id=uuid.uuid4(),
+                    diagnosis_run_id=run_id,
+                    evidence_code=evidence.evidence_code,
+                    tool_execution_id=tool_execution.id,
+                    evidence_type=evidence.evidence_type.value,
+                    title=evidence.evidence_type.value,
+                    summary=evidence.summary,
+                    metrics=evidence.metrics,
+                    filters=evidence.dimensions,
+                    artifact_id=artifact_id,
+                )
+            )
+
+        write_event(
+            db,
+            diagnosis_run_id=run_id,
+            event_type="tool_completed",
+            stage="COLLECTING_EVIDENCE",
+            message=f"{result.tool_name} completed",
+            payload={
+                "tool_call_id": result.tool_call_id,
+                "tool_name": result.tool_name,
+                "status": result.status,
+                "duration_ms": result.duration_ms,
+                "row_count": result.row_count,
+                "warnings": result.warnings,
+                "evidence_codes": [e.evidence_code for e in call_evidence],
+            },
+        )
+
+
+def get_trace(
+    db: Session, run_id: uuid.UUID
+) -> tuple[list[DiagnosisRunEvent], list[ToolExecution], list[EvidenceRecord]]:
+    """Return ordered progress events, tool calls and evidence for a run."""
+    events = (
+        db.query(DiagnosisRunEvent)
+        .filter(DiagnosisRunEvent.diagnosis_run_id == run_id)
+        .order_by(DiagnosisRunEvent.sequence)
+        .all()
+    )
+    tools = (
+        db.query(ToolExecution)
+        .filter(ToolExecution.diagnosis_run_id == run_id)
+        .order_by(ToolExecution.id)
+        .all()
+    )
+    evidence = (
+        db.query(EvidenceRecord)
+        .filter(EvidenceRecord.diagnosis_run_id == run_id)
+        .order_by(EvidenceRecord.evidence_code)
+        .all()
+    )
+    return events, tools, evidence

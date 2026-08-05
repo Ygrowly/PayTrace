@@ -1,4 +1,4 @@
-"""M0b control-plane ORM models.
+"""Control-plane ORM models for M0b, M2, and M3.
 
 Per plan § 10 and ADR 0003, no DB-level FOREIGN KEY constraints are declared.
 Cross-table references are plain columns + indexes; integrity is enforced at
@@ -12,6 +12,7 @@ from app.db.models.artifact import ArtifactRecord
 from app.db.models.diagnosis_report import DiagnosisReportRecord
 from app.db.models.diagnosis_run import DiagnosisRun
 from app.db.models.diagnosis_run_event import DiagnosisRunEvent
+from app.db.models.evaluation_run import EvaluationRun
 from app.db.models.evidence import EvidenceRecord
 from app.db.models.incident import Incident
 from app.db.models.root_cause_finding import RootCauseFinding
@@ -22,6 +23,7 @@ __all__ = [
     "DiagnosisReportRecord",
     "DiagnosisRun",
     "DiagnosisRunEvent",
+    "EvaluationRun",
     "EvidenceRecord",
     "Incident",
     "RootCauseFinding",
