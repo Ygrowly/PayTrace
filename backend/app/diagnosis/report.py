@@ -53,5 +53,9 @@ class DiagnosisReport(BaseModel):
     ontology_version: str
     prompt_version: str | None = None
     validator_version: str
+    model_name: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    estimated_cost: float | None = None
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True, "protected_namespaces": ()}

@@ -169,6 +169,71 @@ class DatasetValidationResult(BaseModel):
     warnings: list[str]
 
 
+# --- Cancel / reorder trace (§ 13.5) -------------------------------------------
+
+
+class CancelReorderQuery(BaseModel):
+    dataset_ref: str
+
+
+class CancelReorderMetrics(BaseModel):
+    """Per-period cancel-reorder flow metrics."""
+
+    period: PeriodLiteral
+    total_intents: int
+    cancelled_count: int
+    cancel_rate: float
+    reordered_count: int
+    reorder_rate: float  # reordered / cancelled
+    switched_method_count: int
+    switch_rate: float  # switched / cancelled
+    recovered_count: int  # reordered AND eventually completed payment
+    recovery_rate: float  # recovered / reordered
+
+
+class CancelReorderDeltas(BaseModel):
+    cancel_rate_delta: float
+    reorder_rate_delta: float
+    switch_rate_delta: float
+    recovery_rate_delta: float
+    # Observational estimate of extra cancelled intents vs baseline.
+    estimated_extra_cancelled: int
+
+
+class CancelReorderResult(BaseModel):
+    baseline: CancelReorderMetrics
+    incident: CancelReorderMetrics
+    deltas: CancelReorderDeltas
+    # Payment methods most frequently switched from/to during incident.
+    top_switch_from: list[str]
+    top_switch_to: list[str]
+
+
+# --- Config changes (§ 13.6) ---------------------------------------------------
+
+
+class ConfigChange(BaseModel):
+    change_id: str
+    change_type: str  # promo_rule, routing, risk_control, version_upgrade
+    target: str  # e.g. "payment_method=card", "channel_b"
+    old_value: str | None
+    new_value: str | None
+    changed_at: str  # ISO 8601 UTC
+
+
+class ConfigChangesQuery(BaseModel):
+    dataset_ref: str
+    change_types: list[str] | None = None  # optional filter
+
+
+class ConfigChangesResult(BaseModel):
+    scenario_id: str
+    baseline_window_changes: list[ConfigChange]
+    incident_window_changes: list[ConfigChange]
+    # Changes that directly affect the impacted dimensions.
+    relevant_changes: list[ConfigChange]
+
+
 # --- Protocol -------------------------------------------------------------------
 
 
@@ -178,11 +243,18 @@ class PaymentAnalyticsSource(Protocol):
     def breakdown_loss(self, query: BreakdownQuery) -> BreakdownResult: ...
     def analyze_benefit_gap(self, query: BenefitQuery) -> BenefitResult: ...
     def inspect_payment_events(self, query: PaymentEventQuery) -> PaymentEventResult: ...
+    def trace_cancel_and_reorder(self, query: CancelReorderQuery) -> CancelReorderResult: ...
+    def get_config_changes(self, query: ConfigChangesQuery) -> ConfigChangesResult: ...
     def validate_dataset(self, dataset_ref: str) -> DatasetValidationResult: ...
 
 
 __all__ = [
     "ALLOWED_DIMENSIONS",
+    "CancelReorderQuery",
+    "CancelReorderResult",
+    "ConfigChange",
+    "ConfigChangesQuery",
+    "ConfigChangesResult",
     "FunnelStage",
     "PaymentAnalyticsSource",
 ]

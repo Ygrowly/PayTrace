@@ -1,7 +1,7 @@
 """Deterministic Evaluation Runner for the M3 Eval Lab.
 
-The runner materialises the five harness scenarios, runs the same fixed
-diagnosis workflow used by M2 with ``RuleBasedModelAdapter``, and scores the
+The runner materialises the harness scenarios, runs the same fixed
+diagnosis workflow used by M2 with the configured ModelAdapter, and scores the
 result only after diagnosis has finished. Ground Truth is loaded here and is
 never passed to ``DiagnosisContext`` or a model adapter.
 """
@@ -16,11 +16,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.analytics.duckdb_source import DuckDBAnalyticsSource
+from app.config import get_settings
+from app.diagnosis.adapter import OpenAICompatibleModelAdapter, RuleBasedModelAdapter
 from app.diagnosis.orchestrator import DiagnosisExecution, DiagnosisOrchestrator
+from app.diagnosis.prompts import PROMPT_VERSION
 from app.evaluation.metrics import aggregate, score_scenario
 from app.evaluation.models import EvaluationReport, ScenarioResult
 from app.harness.artifact_store import ArtifactStore
-from app.harness.scenarios.generator import ScenarioConfig, generate_scenario
+from app.harness.scenarios.generator import (
+    ScenarioConfig,
+    generate_config_changes,
+    generate_scenario,
+)
 from app.harness.scenarios.ground_truth import (
     GENERATOR_VERSION,
     SCENARIO_KINDS,
@@ -60,8 +67,8 @@ def _validate_config(
         raise ValueError("scenario_kinds must contain at least one scenario")
     if num_intents < 1 or num_intents > 10_000:
         raise ValueError("num_intents must be between 1 and 10000")
-    if model_mode != "B0":
-        raise ValueError("only B0 RuleBasedModelAdapter is available in M3")
+    if model_mode not in ("B0", "B1"):
+        raise ValueError("model_mode must be B0 or B1")
     # ``seed`` is intentionally not restricted: negative deterministic seeds
     # are valid inputs to Python's random.Random and are useful in experiments.
     _ = seed
@@ -209,7 +216,21 @@ def run_evaluation(
     root = resolve_runtime_path(scenario_root)
     events_root = root / "events"
     ground_truth_loader = GroundTruthLoader(root / "ground_truth")
-    orchestrator = DiagnosisOrchestrator(source=DuckDBAnalyticsSource(), artifacts=artifacts)
+
+    if model_mode == "B1":
+        settings = get_settings()
+        adapter = OpenAICompatibleModelAdapter(
+            base_url=settings.model_base_url,
+            api_key=settings.model_api_key,
+            model=settings.model_name,
+            prompt_version=prompt_version or PROMPT_VERSION,
+        )
+    else:
+        adapter = RuleBasedModelAdapter()
+
+    orchestrator = DiagnosisOrchestrator(
+        source=DuckDBAnalyticsSource(), artifacts=artifacts, adapter=adapter
+    )
     results: list[ScenarioResult] = []
 
     for kind in kinds:
@@ -218,6 +239,9 @@ def run_evaluation(
         )
         dataset_ref = write_dataset(events, events_root, kind)
         ground_truth_loader.save(ground_truth)
+        # Write config changes alongside the Parquet for get_config_changes tool.
+        config_path = events_root / f"{dataset_ref.scenario_id}.config_changes.json"
+        config_path.write_text(json.dumps(generate_config_changes(kind, seed)), encoding="utf-8")
         results.append(
             _score_one(
                 kind=kind,

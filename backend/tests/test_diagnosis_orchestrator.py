@@ -4,12 +4,18 @@ Covers all five scenario kinds through the full fixed workflow:
   tools → evidence → context → model → validate → report.
 """
 
+import json
+
 import pytest
 
 from app.analytics.duckdb_source import DuckDBAnalyticsSource
 from app.diagnosis.orchestrator import DiagnosisOrchestrator
 from app.diagnosis.report import DiagnosisReport
-from app.harness.scenarios.generator import ScenarioConfig, generate_scenario
+from app.harness.scenarios.generator import (
+    ScenarioConfig,
+    generate_config_changes,
+    generate_scenario,
+)
 from app.harness.scenarios.io import write_dataset
 from app.ontology.registry import ONTOLOGY_VERSION
 
@@ -27,9 +33,20 @@ def source():
 def datasets(tmp_path_factory):
     root = tmp_path_factory.mktemp("datasets")
     refs = {}
-    for kind in ("normal", "benefit_friction", "channel_timeout", "mixed_failure", "data_gap"):
+    for kind in (
+        "normal",
+        "benefit_friction",
+        "channel_timeout",
+        "mixed_failure",
+        "data_gap",
+        "adversarial_irrelevant_config",
+        "adversarial_noise",
+    ):
         events, _ = generate_scenario(ScenarioConfig(kind=kind, seed=42, num_intents=400))
         refs[kind] = write_dataset(events, root, kind)
+        # Write config changes alongside the Parquet for get_config_changes tool.
+        config_path = root / f"{kind}.config_changes.json"
+        config_path.write_text(json.dumps(generate_config_changes(kind, seed=42)), encoding="utf-8")
     return refs
 
 
@@ -207,3 +224,39 @@ def test_orchestrator_with_auto_generated_ids_are_decorrelated(orchestrator, dat
     # adapter is deterministic.
     assert r1.status == r2.status
     assert [rc.label for rc in r1.root_causes] == [rc.label for rc in r2.root_causes]
+
+
+# --- adversarial scenarios --------------------------------------------------------
+
+
+def test_adversarial_irrelevant_config_behaves_like_normal(orchestrator, datasets):
+    """adversarial_irrelevant_config → NORMAL_PAYMENT_FAILURE, LOW, zero lost."""
+    report = orchestrator.run(
+        dataset_ref=str(datasets["adversarial_irrelevant_config"].path),
+        scenario_id="adversarial_irrelevant_config",
+    )
+    _assert_report_structure(report)
+    assert report.status == "SUCCEEDED"
+    assert len(report.root_causes) >= 1
+    rc = report.root_causes[0]
+    assert rc.label == "NORMAL_PAYMENT_FAILURE"
+    assert rc.confidence == "LOW"
+    # Must not contain evidence codes that reference the irrelevant config change
+    # (version_upgrade should not appear in root cause evidence).
+    for rc_item in report.root_causes:
+        assert "version_upgrade" not in str(rc_item.evidence_codes)
+
+
+def test_adversarial_noise_behaves_like_normal(orchestrator, datasets):
+    """adversarial_noise → NORMAL_PAYMENT_FAILURE, LOW, zero lost."""
+    report = orchestrator.run(
+        dataset_ref=str(datasets["adversarial_noise"].path),
+        scenario_id="adversarial_noise",
+    )
+    _assert_report_structure(report)
+    assert report.status == "SUCCEEDED"
+    assert len(report.root_causes) >= 1
+    rc = report.root_causes[0]
+    assert rc.label == "NORMAL_PAYMENT_FAILURE"
+    assert rc.confidence == "LOW"
+    assert rc.estimated_lost_intents == 0

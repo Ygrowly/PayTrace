@@ -6,6 +6,7 @@ against ``ALLOWED_DIMENSIONS`` before use. The DuckDB connection is created
 per call and never exposed to callers.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,13 @@ from app.analytics.base import (
     BreakdownQuery,
     BreakdownResult,
     BreakdownRow,
+    CancelReorderDeltas,
+    CancelReorderMetrics,
+    CancelReorderQuery,
+    CancelReorderResult,
+    ConfigChange,
+    ConfigChangesQuery,
+    ConfigChangesResult,
     DatasetValidationResult,
     ErrorCodeCount,
     FunnelPeriodStats,
@@ -367,6 +375,151 @@ class DuckDBAnalyticsSource:
         return PaymentEventResult(
             baseline=build("baseline"),
             incident=build("incident"),
+        )
+
+    # -- cancel / reorder trace ------------------------------------------------
+
+    def trace_cancel_and_reorder(self, query: CancelReorderQuery) -> CancelReorderResult:
+        con = self._connect(query.dataset_ref)
+        try:
+            rows = con.execute(
+                """
+                WITH per_intent AS (
+                    SELECT period, purchase_intent_id,
+                           BOOL_OR(event_type = 'ORDER_CANCELLED') AS cancelled,
+                           BOOL_OR(event_type = 'REORDERED') AS reordered,
+                           BOOL_OR(event_type = 'PAYMENT_METHOD_SWITCHED') AS switched,
+                           BOOL_OR(funnel_stage = 'PAYMENT_COMPLETED') AS completed,
+                           MAX(CASE WHEN event_type = 'PAYMENT_METHOD_SWITCHED'
+                               THEN payment_method END) AS switch_to_method
+                    FROM events
+                    GROUP BY period, purchase_intent_id
+                )
+                SELECT period,
+                       COUNT(*) AS total,
+                       SUM(cancelled::INT) AS cancelled,
+                       SUM(reordered::INT) AS reordered,
+                       SUM(switched::INT) AS switched,
+                       SUM((reordered AND completed)::INT) AS recovered
+                FROM per_intent
+                GROUP BY period
+                """
+            ).fetchall()
+
+            switch_rows = con.execute(
+                """
+                WITH switches AS (
+                    SELECT period, payment_method,
+                           LAG(payment_method) OVER (
+                               PARTITION BY purchase_intent_id, period
+                               ORDER BY event_time
+                           ) AS prev_method
+                    FROM events
+                    WHERE event_type = 'PAYMENT_METHOD_SWITCHED'
+                )
+                SELECT period, prev_method, payment_method
+                FROM switches
+                WHERE prev_method IS NOT NULL
+                """
+            ).fetchall()
+        finally:
+            con.close()
+
+        def _build(period: str) -> CancelReorderMetrics:
+            row = next((r for r in rows if r[0] == period), None)
+            if not row:
+                return CancelReorderMetrics(
+                    period=period,
+                    total_intents=0,
+                    cancelled_count=0,
+                    cancel_rate=0.0,
+                    reordered_count=0,
+                    reorder_rate=0.0,
+                    switched_method_count=0,
+                    switch_rate=0.0,
+                    recovered_count=0,
+                    recovery_rate=0.0,
+                )
+            _, total, cancelled, reordered, switched, recovered = row
+            return CancelReorderMetrics(
+                period=period,  # type: ignore[arg-type]
+                total_intents=total,
+                cancelled_count=int(cancelled),
+                cancel_rate=(cancelled / total) if total else 0.0,
+                reordered_count=int(reordered),
+                reorder_rate=(reordered / cancelled) if cancelled else 0.0,
+                switched_method_count=int(switched),
+                switch_rate=(switched / cancelled) if cancelled else 0.0,
+                recovered_count=int(recovered),
+                recovery_rate=(recovered / reordered) if reordered else 0.0,
+            )
+
+        baseline = _build("baseline")
+        incident = _build("incident")
+
+        # Top switch patterns during incident only.
+        inc_switches = [(r[1], r[2]) for r in switch_rows if r[0] == "incident"]
+        from_counts: dict[str, int] = {}
+        to_counts: dict[str, int] = {}
+        for frm, to in inc_switches:
+            if frm:
+                from_counts[frm] = from_counts.get(frm, 0) + 1
+            to_counts[to] = to_counts.get(to, 0) + 1
+        top_from = sorted(from_counts, key=from_counts.get, reverse=True)[:3]
+        top_to = sorted(to_counts, key=to_counts.get, reverse=True)[:3]
+
+        def _extra_cancelled() -> int:
+            if baseline.total_intents == 0:
+                return 0
+            extra_rate = max(0.0, incident.cancel_rate - baseline.cancel_rate)
+            return round(extra_rate * incident.total_intents)
+
+        return CancelReorderResult(
+            baseline=baseline,
+            incident=incident,
+            deltas=CancelReorderDeltas(
+                cancel_rate_delta=incident.cancel_rate - baseline.cancel_rate,
+                reorder_rate_delta=incident.reorder_rate - baseline.reorder_rate,
+                switch_rate_delta=incident.switch_rate - baseline.switch_rate,
+                recovery_rate_delta=incident.recovery_rate - baseline.recovery_rate,
+                estimated_extra_cancelled=_extra_cancelled(),
+            ),
+            top_switch_from=top_from,
+            top_switch_to=top_to,
+        )
+
+    # -- config changes --------------------------------------------------------
+
+    def get_config_changes(self, query: ConfigChangesQuery) -> ConfigChangesResult:
+        path = Path(query.dataset_ref)
+        config_path = path.with_suffix(".config_changes.json")
+        changes: list[ConfigChange] = []
+        if config_path.is_file():
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            for item in raw:
+                changes.append(ConfigChange(**item))
+
+        # Split by a simple heuristic: changes within 1 day of scenario start
+        # are "baseline_window", later changes are "incident_window".
+        baseline_window: list[ConfigChange] = []
+        incident_window: list[ConfigChange] = []
+        for c in changes:
+            if "baseline" in c.changed_at.lower() or "baseline" in c.change_id.lower():
+                baseline_window.append(c)
+            else:
+                incident_window.append(c)
+
+        # Filter by change_types if requested.
+        if query.change_types:
+            allowed = set(query.change_types)
+            baseline_window = [c for c in baseline_window if c.change_type in allowed]
+            incident_window = [c for c in incident_window if c.change_type in allowed]
+
+        return ConfigChangesResult(
+            scenario_id=path.stem,
+            baseline_window_changes=baseline_window,
+            incident_window_changes=incident_window,
+            relevant_changes=incident_window,  # incident-window changes are the relevant ones
         )
 
     # -- data quality ---------------------------------------------------------

@@ -31,10 +31,12 @@ def create_or_get(
     seed: int,
     num_intents: int,
     ontology_version: str,
+    model_name: str | None = None,
 ) -> tuple[EvaluationRun, bool]:
     """Create one evaluation or return the existing idempotent request."""
     now = datetime.now(UTC)
     run_id = uuid.uuid4()
+    name = model_name or ("RuleBasedModelAdapter" if model_mode == "B0" else None)
     stmt = (
         pg_insert(EvaluationRun)
         .values(
@@ -42,7 +44,7 @@ def create_or_get(
             idempotency_key=idempotency_key,
             status="PENDING",
             model_mode=model_mode,
-            model_name="RuleBasedModelAdapter" if model_mode == "B0" else None,
+            model_name=name,
             prompt_version=prompt_version,
             ontology_version=ontology_version,
             scenario_kinds=scenario_kinds,

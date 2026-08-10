@@ -142,3 +142,54 @@ def test_ground_truth_is_loaded_after_diagnosis(monkeypatch, tmp_path) -> None:
     )
 
     assert order == ["diagnosis", "ground_truth:normal"]
+
+
+# --- B1 model mode ----------------------------------------------------------------
+
+
+def test_b1_mode_falls_back_to_rule_based_when_no_api_key(tmp_path) -> None:
+    """B1 with no API key must fall back to RuleBasedModelAdapter and succeed."""
+    result = run_evaluation(
+        evaluation_run_id="eval-b1-fallback",
+        model_mode="B1",
+        scenario_kinds=["normal"],
+        seed=42,
+        num_intents=100,
+        scenario_root=tmp_path / "scenarios",
+        artifacts=LocalArtifactStore(tmp_path / "artifacts"),
+    )
+    assert result.report.metrics.run_success_rate == 1.0
+    assert result.report.model_mode == "B1"
+    normal = next(item for item in result.report.scenario_results if item.scenario_kind == "normal")
+    assert normal.diagnosis_status == "SUCCEEDED"
+
+
+def test_b1_mode_rejected_invalid_mode(tmp_path) -> None:
+    """Invalid model_mode must raise ValueError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="model_mode must be B0 or B1"):
+        run_evaluation(
+            evaluation_run_id="eval-bad-mode",
+            model_mode="B2",
+            scenario_kinds=["normal"],
+            num_intents=100,
+            scenario_root=tmp_path / "scenarios",
+            artifacts=LocalArtifactStore(tmp_path / "artifacts"),
+        )
+
+
+def test_b0_mode_still_works(tmp_path) -> None:
+    """B0 mode must produce the same results as before."""
+    result = run_evaluation(
+        evaluation_run_id="eval-b0",
+        model_mode="B0",
+        scenario_kinds=["normal"],
+        seed=42,
+        num_intents=100,
+        scenario_root=tmp_path / "scenarios",
+        artifacts=LocalArtifactStore(tmp_path / "artifacts"),
+    )
+    assert result.report.metrics.run_success_rate == 1.0
+    assert result.report.model_mode == "B0"
+    assert result.report.metrics.scenario_count == 1

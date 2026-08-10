@@ -77,6 +77,8 @@ ScenarioKind = Literal[
     "channel_timeout",
     "mixed_failure",
     "data_gap",
+    "adversarial_irrelevant_config",
+    "adversarial_noise",
 ]
 
 SCENARIO_KINDS: list[ScenarioKind] = [
@@ -85,4 +87,6 @@ SCENARIO_KINDS: list[ScenarioKind] = [
     "channel_timeout",
     "mixed_failure",
     "data_gap",
+    "adversarial_irrelevant_config",
+    "adversarial_noise",
 ]

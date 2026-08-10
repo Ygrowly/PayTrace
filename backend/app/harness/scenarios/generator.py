@@ -312,7 +312,8 @@ def _params_for(kind: ScenarioKind, period: Period) -> InjectedParameters:
             ],
             null_benefit_id_rate=0.85,
         )
-    return InjectedParameters()  # normal
+    # adversarial_irrelevant_config and adversarial_noise: clean (same as normal).
+    return InjectedParameters()  # normal, adversarial_irrelevant_config, adversarial_noise
 
 
 def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
@@ -371,6 +372,28 @@ def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
             random_seed=cfg.seed,
             created_at=cfg.start_time,
         )
+    if kind == "adversarial_irrelevant_config":
+        return GroundTruth(
+            scenario_id=kind,
+            expected_anomalous_stages=[],
+            expected_root_causes=["NORMAL_PAYMENT_FAILURE"],
+            affected_dimensions={},
+            injected_parameters=InjectedParameters(),
+            expected_data_gaps=[],
+            random_seed=cfg.seed,
+            created_at=cfg.start_time,
+        )
+    if kind == "adversarial_noise":
+        return GroundTruth(
+            scenario_id=kind,
+            expected_anomalous_stages=[],
+            expected_root_causes=["NORMAL_PAYMENT_FAILURE"],
+            affected_dimensions={},
+            injected_parameters=InjectedParameters(),
+            expected_data_gaps=[],
+            random_seed=cfg.seed,
+            created_at=cfg.start_time,
+        )
     return GroundTruth(
         scenario_id=kind,
         expected_anomalous_stages=[],
@@ -403,3 +426,72 @@ def generate_scenario(cfg: ScenarioConfig) -> tuple[list[CanonicalPaymentEvent],
             events.extend(_emit_events(state, cfg.kind, drop_stages))
     gt = _ground_truth_for(cfg)
     return events, gt
+
+
+def generate_config_changes(kind: str, seed: int, start_time: datetime | None = None) -> list[dict]:
+    """Generate config change records for a scenario kind (deterministic).
+
+    Returns a list of dicts matching the ``ConfigChange`` model fields.
+    Config changes are stored alongside Parquet datasets and read by
+    ``DuckDBAnalyticsSource.get_config_changes``.
+    """
+    if start_time is None:
+        start_time = datetime(2026, 7, 1, 0, 0, 0, tzinfo=UTC)
+    ts = start_time.isoformat()
+
+    if kind == "benefit_friction":
+        return [
+            dict(
+                change_id=f"cfg-{kind}-001",
+                change_type="promo_rule",
+                target="payment_method=card",
+                old_value="benefit_bn20_active=true",
+                new_value="benefit_bn20_active=false",
+                changed_at=ts,
+            ),
+        ]
+    if kind == "channel_timeout":
+        return [
+            dict(
+                change_id=f"cfg-{kind}-001",
+                change_type="routing",
+                target="channel_b",
+                old_value="timeout_ms=3000",
+                new_value="timeout_ms=8000",
+                changed_at=ts,
+            ),
+        ]
+    if kind == "mixed_failure":
+        return [
+            dict(
+                change_id=f"cfg-{kind}-001",
+                change_type="promo_rule",
+                target="payment_method=card",
+                old_value="benefit_bn20_active=true",
+                new_value="benefit_bn20_active=false",
+                changed_at=ts,
+            ),
+            dict(
+                change_id=f"cfg-{kind}-002",
+                change_type="routing",
+                target="channel_b",
+                old_value="timeout_ms=3000",
+                new_value="timeout_ms=8000",
+                changed_at=ts,
+            ),
+        ]
+    if kind == "adversarial_irrelevant_config":
+        # A config change that is NOT related to payment — the agent must
+        # NOT attribute any loss to it. Tests false-positive resistance.
+        return [
+            dict(
+                change_id=f"cfg-{kind}-001",
+                change_type="version_upgrade",
+                target="client_ui",
+                old_value="v2.3.0",
+                new_value="v2.4.0",
+                changed_at=ts,
+            ),
+        ]
+    # normal and data_gap and adversarial_noise: no config changes.
+    return []

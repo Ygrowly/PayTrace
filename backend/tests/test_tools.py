@@ -1,10 +1,16 @@
-"""Tests for the tool framework (§ 14.2) and the four diagnosis tools (§ 13)."""
+"""Tests for the tool framework (§ 14.2) and the six diagnosis tools (§ 13)."""
+
+import json
 
 import pytest
 
 from app.analytics.duckdb_source import DuckDBAnalyticsSource
 from app.harness.artifact_store import LocalArtifactStore
-from app.harness.scenarios.generator import ScenarioConfig, generate_scenario
+from app.harness.scenarios.generator import (
+    ScenarioConfig,
+    generate_config_changes,
+    generate_scenario,
+)
 from app.harness.scenarios.io import write_dataset
 from app.ontology.registry import EvidenceType
 from app.tools.base import (
@@ -33,9 +39,20 @@ def artifacts(tmp_path_factory):
 def datasets(tmp_path_factory):
     root = tmp_path_factory.mktemp("datasets")
     refs = {}
-    for kind in ("normal", "benefit_friction", "channel_timeout", "mixed_failure", "data_gap"):
+    for kind in (
+        "normal",
+        "benefit_friction",
+        "channel_timeout",
+        "mixed_failure",
+        "data_gap",
+        "adversarial_irrelevant_config",
+        "adversarial_noise",
+    ):
         events, _ = generate_scenario(ScenarioConfig(kind=kind, seed=42, num_intents=400))
         refs[kind] = write_dataset(events, root, kind)
+        # Write config changes alongside the Parquet for get_config_changes tool.
+        config_path = root / f"{kind}.config_changes.json"
+        config_path.write_text(json.dumps(generate_config_changes(kind, seed=42)), encoding="utf-8")
     return refs
 
 
@@ -246,3 +263,117 @@ def test_mixed_failure_produces_benefit_and_timeout_evidence(registry, datasets)
     assert EvidenceType.BENEFIT_GAP_FRICTION in types
     assert EvidenceType.CHANNEL_TIMEOUT in types
     assert EvidenceType.FUNNEL_STAGE_DEGRADATION in types
+
+
+# --- trace_cancel_and_reorder -----------------------------------------------------
+
+
+def test_cancel_reorder_tool_normal_no_evidence(registry, datasets):
+    res = registry.execute(
+        "call-0",
+        "trace_cancel_and_reorder",
+        ToolPolicy(),
+        dataset_ref=datasets["normal"].path,
+    )
+    assert res.status == "success"
+    assert res.evidence == [], "normal scenario should have no cancel flow evidence"
+
+
+def test_cancel_reorder_tool_benefit_friction_evidence(registry, datasets):
+    res = registry.execute(
+        "call-0",
+        "trace_cancel_and_reorder",
+        ToolPolicy(),
+        dataset_ref=datasets["benefit_friction"].path,
+    )
+    assert res.status == "success"
+    assert len(res.evidence) >= 1
+    ev = res.evidence[0]
+    assert ev.evidence_type == EvidenceType.CANCEL_REORDER_FLOW
+    assert ev.metrics["cancel_rate_delta"] > 0
+    assert ev.metrics["estimated_extra_cancelled"] > 0
+
+
+def test_cancel_reorder_tool_stores_artifact(registry, datasets, artifacts):
+    res = registry.execute(
+        "call-0",
+        "trace_cancel_and_reorder",
+        ToolPolicy(),
+        dataset_ref=datasets["benefit_friction"].path,
+    )
+    assert res.artifact_ref is not None
+    payload = artifacts.get_bytes(res.artifact_ref)
+    assert b"cancel_rate" in payload
+
+
+# --- get_config_changes -----------------------------------------------------------
+
+
+def test_config_changes_tool_normal_empty(registry, datasets):
+    res = registry.execute(
+        "call-0",
+        "get_config_changes",
+        ToolPolicy(),
+        dataset_ref=datasets["normal"].path,
+    )
+    assert res.status == "success"
+    assert res.evidence == [], "normal scenario should have no config changes"
+    assert res.row_count == 0
+
+
+def test_config_changes_tool_mixed_failure_evidence(registry, datasets):
+    res = registry.execute(
+        "call-0",
+        "get_config_changes",
+        ToolPolicy(),
+        dataset_ref=datasets["mixed_failure"].path,
+    )
+    assert res.status == "success"
+    types = {e.evidence_type for e in res.evidence}
+    assert EvidenceType.CONFIG_CHANGE in types
+    # mixed_failure should have both promo and routing changes.
+    change_types = {e.metrics["change_type"] for e in res.evidence}
+    assert "promo_rule" in change_types
+    assert "routing" in change_types
+
+
+def test_config_changes_tool_filter_by_type(registry, datasets):
+    res = registry.execute(
+        "call-0",
+        "get_config_changes",
+        ToolPolicy(),
+        dataset_ref=datasets["mixed_failure"].path,
+        change_types=["routing"],
+    )
+    assert all(e.metrics["change_type"] == "routing" for e in res.evidence)
+    assert len(res.evidence) == 1
+
+
+def test_config_changes_tool_stores_artifact(registry, datasets, artifacts):
+    res = registry.execute(
+        "call-0",
+        "get_config_changes",
+        ToolPolicy(),
+        dataset_ref=datasets["mixed_failure"].path,
+    )
+    assert res.artifact_ref is not None
+    payload = artifacts.get_bytes(res.artifact_ref)
+    assert b"promo_rule" in payload
+
+
+# --- builder includes all 6 tools -------------------------------------------------
+
+
+def test_build_default_tools_includes_all_six():
+    from app.analytics.duckdb_source import DuckDBAnalyticsSource
+
+    tools = build_default_tools(DuckDBAnalyticsSource())
+    names = {t.name for t in tools}
+    assert names == {
+        "get_payment_funnel",
+        "breakdown_conversion_loss",
+        "analyze_benefit_gap",
+        "inspect_payment_events",
+        "trace_cancel_and_reorder",
+        "get_config_changes",
+    }

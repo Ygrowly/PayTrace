@@ -50,8 +50,9 @@ class DiagnosisOrchestrator:
 
     1. Validate dataset → data quality checks
     2. Execute fixed tool pipeline:
-       get_payment_funnel → breakdown_conversion_loss
-       → analyze_benefit_gap → inspect_payment_events
+       get_payment_funnel → analyze_benefit_gap → inspect_payment_events
+       → trace_cancel_and_reorder → get_config_changes
+       → breakdown_conversion_loss (if anomalous stages detected)
     3. Evidence Ledger → Context Builder
     4. Model Adapter → Report Validator → one correction retry
     """
@@ -220,7 +221,23 @@ class DiagnosisOrchestrator:
         ledger.record_result(inspect_res)
         tool_results.append(inspect_res)
 
-        # 2d. breakdown_conversion_loss — only when anomalous stages exist
+        # 2d. trace_cancel_and_reorder (always — self-detects cancel flow changes)
+        cancel_res = registry.execute(
+            self._call_id(call_idx), "trace_cancel_and_reorder", policy, dataset_ref=dataset_ref
+        )
+        call_idx += 1
+        ledger.record_result(cancel_res)
+        tool_results.append(cancel_res)
+
+        # 2e. get_config_changes (always — self-detects relevant config changes)
+        config_res = registry.execute(
+            self._call_id(call_idx), "get_config_changes", policy, dataset_ref=dataset_ref
+        )
+        call_idx += 1
+        ledger.record_result(config_res)
+        tool_results.append(config_res)
+
+        # 2f. breakdown_conversion_loss — only when anomalous stages exist
         #     (plan: "定位异常阶段 → breakdown_conversion_loss").
         if anomalous_stages:
             for dim in self._dimensions:

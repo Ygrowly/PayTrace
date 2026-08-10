@@ -12,10 +12,15 @@ tree; nothing in the events output references it.
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
-from app.harness.scenarios.generator import ScenarioConfig, generate_scenario
+from app.harness.scenarios.generator import (
+    ScenarioConfig,
+    generate_config_changes,
+    generate_scenario,
+)
 from app.harness.scenarios.ground_truth import SCENARIO_KINDS, GroundTruthLoader
 from app.harness.scenarios.io import write_dataset
 
@@ -35,6 +40,10 @@ def main() -> int:
         events, gt = generate_scenario(cfg)
         ref = write_dataset(events, events_root, kind)
         gt_loader.save(gt)
+        # Write config changes alongside the Parquet for DuckDB source discovery.
+        config_changes = generate_config_changes(kind, args.seed)
+        config_path = events_root / f"{kind}.config_changes.json"
+        config_path.write_text(json.dumps(config_changes, indent=2), encoding="utf-8")
         print(
             f"{kind:18s} events={ref.num_events:6d} "
             f"sha256={ref.checksum_sha256[:12]}... -> {ref.path}"

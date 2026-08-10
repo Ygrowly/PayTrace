@@ -62,6 +62,7 @@ def create_evaluation(
         seed=body.seed,
         num_intents=body.num_intents,
         ontology_version=ONTOLOGY_VERSION,
+        model_name=(get_settings().model_name if body.model_mode == "B1" else None),
     )
     db.commit()
     if not created:

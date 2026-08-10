@@ -173,3 +173,79 @@ def test_dataset_ref_never_points_at_ground_truth(tmp_path):
     events, _ = generate_scenario(ScenarioConfig(kind="normal", **_SMALL))
     ref = write_dataset(events, tmp_path, "normal")
     assert ref.path.endswith(".parquet")
+
+
+def test_generate_config_changes_mixed_failure():
+    from app.harness.scenarios.generator import generate_config_changes
+
+    changes = generate_config_changes("mixed_failure", seed=42)
+    assert len(changes) == 2
+    types = {c["change_type"] for c in changes}
+    assert types == {"promo_rule", "routing"}
+
+
+def test_generate_config_changes_normal_empty():
+    from app.harness.scenarios.generator import generate_config_changes
+
+    changes = generate_config_changes("normal", seed=42)
+    assert changes == []
+
+
+def test_generate_config_changes_channel_timeout():
+    from app.harness.scenarios.generator import generate_config_changes
+
+    changes = generate_config_changes("channel_timeout", seed=42)
+    assert len(changes) == 1
+    assert changes[0]["change_type"] == "routing"
+    assert changes[0]["target"] == "channel_b"
+
+
+def test_generate_config_changes_is_reproducible():
+    from app.harness.scenarios.generator import generate_config_changes
+
+    c1 = generate_config_changes("mixed_failure", seed=99)
+    c2 = generate_config_changes("mixed_failure", seed=99)
+    assert c1 == c2
+
+
+# --- adversarial scenarios --------------------------------------------------------
+
+
+def test_adversarial_irrelevant_config_is_clean():
+    """adversarial_irrelevant_config: no faults injected, data is clean like normal."""
+    events, gt = generate_scenario(ScenarioConfig(kind="adversarial_irrelevant_config", **_SMALL))
+    incident = [e for e in events if e.period == Period.INCIDENT]
+    fault_types = {
+        EventType.ORDER_CANCELLED,
+        EventType.PAYMENT_METHOD_SWITCHED,
+        EventType.PAYMENT_TIMEOUT,
+    }
+    assert not {e.event_type for e in incident} & fault_types
+    assert gt.expected_root_causes == ["NORMAL_PAYMENT_FAILURE"]
+    assert gt.expected_anomalous_stages == []
+
+
+def test_adversarial_noise_is_clean():
+    """adversarial_noise: no faults injected, data is clean like normal."""
+    events, gt = generate_scenario(ScenarioConfig(kind="adversarial_noise", **_SMALL))
+    assert events
+    assert gt.expected_root_causes == ["NORMAL_PAYMENT_FAILURE"]
+    assert gt.expected_anomalous_stages == []
+
+
+def test_adversarial_irrelevant_config_has_config_changes():
+    """adversarial_irrelevant_config must have a version_upgrade change."""
+    from app.harness.scenarios.generator import generate_config_changes
+
+    changes = generate_config_changes("adversarial_irrelevant_config", seed=42)
+    assert len(changes) == 1
+    assert changes[0]["change_type"] == "version_upgrade"
+    assert "client_ui" in changes[0]["target"]
+
+
+def test_adversarial_noise_has_no_config_changes():
+    """adversarial_noise has no config changes."""
+    from app.harness.scenarios.generator import generate_config_changes
+
+    changes = generate_config_changes("adversarial_noise", seed=42)
+    assert changes == []

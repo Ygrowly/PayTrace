@@ -12,6 +12,8 @@ from typing import Any
 from app.analytics.base import (
     BenefitQuery,
     BreakdownQuery,
+    CancelReorderQuery,
+    ConfigChangesQuery,
     FunnelQuery,
     PaymentAnalyticsSource,
     PaymentEventQuery,
@@ -270,6 +272,118 @@ class InspectPaymentEventsTool(_BaseTool):
         )
 
 
+class TraceCancelAndReorderTool(_BaseTool):
+    """Tool 5: trace cancel → reorder → switch method → recovery flow (PRD §8.1)."""
+
+    name = "trace_cancel_and_reorder"
+
+    def run(self, tool_call_id: str, *, dataset_ref: str) -> ToolResult:
+        res = self._source.trace_cancel_and_reorder(CancelReorderQuery(dataset_ref=dataset_ref))
+        artifact = self._store_artifact(tool_call_id, "cancel_reorder", res.model_dump())
+
+        evidence: list[EvidenceDraft] = []
+        warnings: list[str] = []
+        d = res.deltas
+        if d.cancel_rate_delta > 0.05:
+            evidence.append(
+                EvidenceDraft(
+                    evidence_type=EvidenceType.CANCEL_REORDER_FLOW,
+                    summary=(
+                        f"Cancel rate rose {d.cancel_rate_delta:+.3f} "
+                        f"(baseline {res.baseline.cancel_rate:.3f} → incident "
+                        f"{res.incident.cancel_rate:.3f}); "
+                        f"est. {d.estimated_extra_cancelled} extra cancelled intents; "
+                        f"reorder rate {res.incident.reorder_rate:.3f}, "
+                        f"switch rate {res.incident.switch_rate:.3f}, "
+                        f"recovery rate {res.incident.recovery_rate:.3f}"
+                    ),
+                    metrics={
+                        "cancel_rate_delta": round(d.cancel_rate_delta, 6),
+                        "baseline_cancel_rate": round(res.baseline.cancel_rate, 6),
+                        "incident_cancel_rate": round(res.incident.cancel_rate, 6),
+                        "estimated_extra_cancelled": d.estimated_extra_cancelled,
+                        "incident_reorder_rate": round(res.incident.reorder_rate, 6),
+                        "incident_switch_rate": round(res.incident.switch_rate, 6),
+                        "incident_recovery_rate": round(res.incident.recovery_rate, 6),
+                    },
+                )
+            )
+        if res.top_switch_from:
+            patterns = "; ".join(
+                f"{f}→{t}" for f, t in zip(res.top_switch_from, res.top_switch_to, strict=False)
+            )
+            warnings.append(f"top switch patterns: {patterns}")
+
+        summary = (
+            f"Cancel/reorder: baseline cancel {res.baseline.cancel_rate:.3f} → "
+            f"incident {res.incident.cancel_rate:.3f} (delta {d.cancel_rate_delta:+.3f}); "
+            f"extra cancelled est. {d.estimated_extra_cancelled}; "
+            f"recovery {res.incident.recovery_rate:.3f}"
+        )
+        return ToolResult(
+            tool_call_id=tool_call_id,
+            tool_name=self.name,
+            status="success",
+            summary=summary,
+            evidence=evidence,
+            artifact_ref=artifact,
+            row_count=res.incident.total_intents + res.baseline.total_intents,
+            warnings=warnings,
+        )
+
+
+class GetConfigChangesTool(_BaseTool):
+    """Tool 6: query config changes (promo/routing/risk/version) near incident (PRD §10.7)."""
+
+    name = "get_config_changes"
+
+    def run(
+        self,
+        tool_call_id: str,
+        *,
+        dataset_ref: str,
+        change_types: list[str] | None = None,
+    ) -> ToolResult:
+        res = self._source.get_config_changes(
+            ConfigChangesQuery(dataset_ref=dataset_ref, change_types=change_types)
+        )
+        artifact = self._store_artifact(tool_call_id, "config_changes", res.model_dump())
+
+        evidence: list[EvidenceDraft] = []
+        all_changes = res.baseline_window_changes + res.incident_window_changes
+        if all_changes:
+            for c in all_changes:
+                evidence.append(
+                    EvidenceDraft(
+                        evidence_type=EvidenceType.CONFIG_CHANGE,
+                        summary=(
+                            f"[{c.change_type}] {c.target}: "
+                            f"{c.old_value or 'none'} → {c.new_value or 'none'}"
+                        ),
+                        metrics={
+                            "change_type": c.change_type,
+                            "changed_at": c.changed_at,
+                        },
+                        dimensions={"target": c.target},
+                    )
+                )
+
+        summary = (
+            f"Config changes: {len(res.baseline_window_changes)} baseline-window, "
+            f"{len(res.incident_window_changes)} incident-window, "
+            f"{len(res.relevant_changes)} relevant"
+        )
+        return ToolResult(
+            tool_call_id=tool_call_id,
+            tool_name=self.name,
+            status="success",
+            summary=summary,
+            evidence=evidence,
+            artifact_ref=artifact,
+            row_count=len(all_changes),
+        )
+
+
 def build_default_tools(
     source: PaymentAnalyticsSource, artifacts: ArtifactStore | None = None
 ) -> list:
@@ -278,4 +392,6 @@ def build_default_tools(
         BreakdownConversionLossTool(source, artifacts),
         AnalyzeBenefitGapTool(source, artifacts),
         InspectPaymentEventsTool(source, artifacts),
+        TraceCancelAndReorderTool(source, artifacts),
+        GetConfigChangesTool(source, artifacts),
     ]

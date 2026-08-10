@@ -5,9 +5,19 @@ scenario filenames. Serves as the M2 baseline adapter and the fallback when
 a real model is unavailable or validator retries are exhausted.
 """
 
+import json
+import logging
+
 from app.diagnosis.model import DiagnosisContext
+from app.diagnosis.prompts import (
+    DIAGNOSIS_SYSTEM_PROMPT_V1,
+    DIAGNOSIS_USER_PROMPT_V1,
+    PROMPT_VERSION,
+)
 from app.diagnosis.report import DiagnosisReport, RootCause
 from app.ontology.registry import EvidenceType
+
+logger = logging.getLogger(__name__)
 
 
 class RuleBasedModelAdapter:
@@ -225,3 +235,239 @@ def _recommend_actions(
         actions.append("Monitor payment conversion rates for recurrence.")
         actions.append("Consider increasing observation window for statistical significance.")
     return actions
+
+
+# --- OpenAI-compatible adapter (B1, plan § 15.2) -----------------------------------
+
+
+# JSON Schema for DiagnosisReport, used in the system prompt for API calls.
+_REPORT_SCHEMA_JSON = json.dumps(
+    {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["SUCCEEDED", "NEEDS_DATA"]},
+            "summary": {"type": "string"},
+            "anomalous_stages": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "root_causes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {
+                            "type": "string",
+                            "enum": [
+                                "BENEFIT_SELECTION_FRICTION",
+                                "AUTHENTICATION_FAILURE",
+                                "CHANNEL_TIMEOUT",
+                                "CALLBACK_FAILURE",
+                                "NORMAL_PAYMENT_FAILURE",
+                                "DATA_QUALITY_ISSUE",
+                                "UNKNOWN",
+                            ],
+                        },
+                        "category": {
+                            "type": ["string", "null"],
+                            "enum": [
+                                "infrastructure",
+                                "product",
+                                "business",
+                                "data_quality",
+                                None,
+                            ],
+                        },
+                        "confidence": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH"]},
+                        "estimated_lost_intents": {"type": ["integer", "null"]},
+                        "explanation": {"type": "string"},
+                        "evidence_codes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "rank": {"type": "integer", "minimum": 1},
+                        "alternative_explanation": {"type": ["string", "null"]},
+                    },
+                    "required": [
+                        "label",
+                        "category",
+                        "confidence",
+                        "explanation",
+                        "evidence_codes",
+                        "rank",
+                    ],
+                },
+            },
+            "total_estimated_lost_intents": {"type": "integer", "minimum": 0},
+            "explained_lost_intents": {"type": "integer", "minimum": 0},
+            "unexplained_lost_intents": {"type": "integer", "minimum": 0},
+            "missing_data": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "alternative_explanations": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "recommended_actions": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": [
+            "status",
+            "summary",
+            "anomalous_stages",
+            "root_causes",
+            "total_estimated_lost_intents",
+            "explained_lost_intents",
+            "unexplained_lost_intents",
+            "missing_data",
+            "alternative_explanations",
+            "recommended_actions",
+        ],
+    },
+    ensure_ascii=False,
+)
+
+# Re-export for convenience.
+__all__ = [
+    "RuleBasedModelAdapter",
+    "OpenAICompatibleModelAdapter",
+]
+
+
+class OpenAICompatibleModelAdapter:
+    """LLM adapter calling an OpenAI-compatible API (plan § 15.2).
+
+    Reads configuration from environment via ``Settings``. When ``model_api_key``
+    is empty or the API is unreachable, logs a warning and falls back to
+    ``RuleBasedModelAdapter`` so that the system remains usable without a key.
+
+    Token usage from the most recent call is exposed on ``last_usage`` for
+    trace and evaluation consumers.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str = "",
+        api_key: str = "",
+        model: str = "",
+        timeout: float = 60.0,
+        validator_version: str = "paytrace.validator.v1",
+        prompt_version: str = PROMPT_VERSION,
+    ) -> None:
+        self._base_url = base_url
+        self._api_key = api_key
+        self._model = model
+        self._timeout = timeout
+        self._validator_version = validator_version
+        self._prompt_version = prompt_version
+        self._fallback = RuleBasedModelAdapter(validator_version=validator_version)
+        self.last_usage: dict[str, int] | None = None
+
+    @property
+    def model_name(self) -> str:
+        return self._model or "rule_based"
+
+    def _build_user_prompt(self, ctx: DiagnosisContext) -> str:
+        evidence_lines = ctx.evidence_summaries or ["(none)"]
+        evidence_block = "\n".join(evidence_lines)
+        missing_data_block = "\n".join(ctx.missing_data) if ctx.missing_data else "(none)"
+        anomalous_str = ", ".join(ctx.anomalous_stages) if ctx.anomalous_stages else "(none)"
+        return DIAGNOSIS_USER_PROMPT_V1.format(
+            incident_id=ctx.incident_id,
+            diagnosis_run_id=ctx.diagnosis_run_id,
+            funnel_summary=ctx.funnel_summary or "(none)",
+            anomalous_stages=anomalous_str,
+            evidence_block=evidence_block,
+            missing_data_block=missing_data_block,
+        )
+
+    def _parse_response(self, body: str, ctx: DiagnosisContext) -> DiagnosisReport:
+        data = json.loads(body)
+        root_causes = [
+            RootCause(
+                label=rc["label"],
+                category=rc.get("category"),
+                confidence=rc["confidence"],
+                estimated_lost_intents=rc.get("estimated_lost_intents"),
+                explanation=rc["explanation"],
+                evidence_codes=rc.get("evidence_codes", []),
+                rank=rc.get("rank", i + 1),
+                alternative_explanation=rc.get("alternative_explanation"),
+            )
+            for i, rc in enumerate(data.get("root_causes", []))
+        ]
+        return DiagnosisReport(
+            incident_id=ctx.incident_id,
+            diagnosis_run_id=ctx.diagnosis_run_id,
+            status=data.get("status", "NEEDS_DATA"),
+            summary=data.get("summary", "No summary provided."),
+            anomalous_stages=data.get("anomalous_stages", ctx.anomalous_stages),
+            root_causes=root_causes,
+            total_estimated_lost_intents=data.get("total_estimated_lost_intents", 0),
+            explained_lost_intents=data.get("explained_lost_intents", 0),
+            unexplained_lost_intents=data.get("unexplained_lost_intents", 0),
+            missing_data=data.get("missing_data", []),
+            alternative_explanations=data.get("alternative_explanations", []),
+            recommended_actions=data.get("recommended_actions", []),
+            ontology_version=ctx.ontology_version,
+            prompt_version=self._prompt_version,
+            validator_version=self._validator_version,
+            model_name=self.model_name,
+        )
+
+    def generate(self, ctx: DiagnosisContext) -> DiagnosisReport:
+        if not self._api_key or not self._base_url:
+            logger.warning("LLM adapter: no api_key or base_url, falling back to rule-based")
+            return self._fallback.generate(ctx)
+
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(
+                base_url=self._base_url,
+                api_key=self._api_key,
+                timeout=self._timeout,
+            )
+            user_prompt = self._build_user_prompt(ctx)
+            system_prompt = (
+                DIAGNOSIS_SYSTEM_PROMPT_V1
+                + "\n\n## Output Schema\nRespond with valid JSON matching this schema:\n```json\n"
+                + _REPORT_SCHEMA_JSON
+                + "\n```"
+            )
+            response = client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                max_tokens=4096,
+                response_format={"type": "json_object"},
+            )
+            body = response.choices[0].message.content or "{}"
+            usage = response.usage
+            self.last_usage = {
+                "input_tokens": usage.prompt_tokens if usage else 0,
+                "output_tokens": usage.completion_tokens if usage else 0,
+            }
+            report = self._parse_response(body, ctx)
+            return report.model_copy(
+                update={
+                    "model_name": self.model_name,
+                    "input_tokens": self.last_usage.get("input_tokens"),
+                    "output_tokens": self.last_usage.get("output_tokens"),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 - fallback on any LLM error
+            logger.warning(
+                "LLM adapter failed (%s: %s), falling back to rule-based",
+                type(exc).__name__,
+                str(exc)[:200],
+            )
+            self.last_usage = None
+            return self._fallback.generate(ctx)

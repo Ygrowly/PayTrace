@@ -10,7 +10,10 @@ class Settings(BaseSettings):
     # the monorepo root. This lets `uv run alembic upgrade head` and `uvicorn`
     # work both when invoked from `backend/` and from the repo root.
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore"
+        env_file=(".env", "../.env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        protected_namespaces=("settings_",),
     )
 
     env: str = "dev"
@@ -37,6 +40,16 @@ class Settings(BaseSettings):
 
     # Celery.
     celery_concurrency: int = 2
+
+    # Model provider (plan § 15.2).
+    model_provider: str = "rule_based"
+    model_base_url: str = ""
+    model_api_key: str = ""
+    model_name: str = ""
+
+    # Diagnostic harness budget (plan § 14.3).
+    tool_timeout_seconds: int = 15
+    max_tool_calls: int = 8
 
 
 @lru_cache

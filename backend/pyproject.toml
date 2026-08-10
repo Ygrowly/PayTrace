@@ -20,6 +20,7 @@ dependencies = [
     "pydantic-settings>=2.5.0,<2.6.0",
     "duckdb>=1.1.0,<1.2.0",
     "pyarrow>=17.0.0,<18.0.0",
+    "openai>=1.60.0,<2.0.0",
 ]
 
 [project.optional-dependencies]

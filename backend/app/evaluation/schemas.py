@@ -13,7 +13,7 @@ from app.harness.scenarios.ground_truth import SCENARIO_KINDS
 class EvaluationRunCreate(BaseModel):
     model_config = {"protected_namespaces": ()}
 
-    model_mode: Literal["B0"] = "B0"
+    model_mode: Literal["B0", "B1"] = "B0"
     prompt_version: str | None = Field(default="rule-based.v1", max_length=64)
     scenario_kinds: list[str] = Field(default_factory=lambda: list(SCENARIO_KINDS), min_length=1)
     seed: int = 42

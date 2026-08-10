@@ -68,6 +68,8 @@ class EvidenceType(StrEnum):
     CHANNEL_TIMEOUT = "CHANNEL_TIMEOUT"
     ERROR_CODE_CONCENTRATION = "ERROR_CODE_CONCENTRATION"
     DATA_GAP = "DATA_GAP"
+    CANCEL_REORDER_FLOW = "CANCEL_REORDER_FLOW"
+    CONFIG_CHANGE = "CONFIG_CHANGE"
 
 
 class RootCauseLabel(StrEnum):
@@ -309,6 +311,14 @@ _EVIDENCE_TYPES: list[EvidenceTypeDefinition] = [
     ),
     EvidenceTypeDefinition(
         evidence_type=EvidenceType.DATA_GAP, description="Required events or fields are missing."
+    ),
+    EvidenceTypeDefinition(
+        evidence_type=EvidenceType.CANCEL_REORDER_FLOW,
+        description="Cancel → reorder → switch method → recovery flow analysis.",
+    ),
+    EvidenceTypeDefinition(
+        evidence_type=EvidenceType.CONFIG_CHANGE,
+        description="Configuration change (promo, routing, risk, version) near incident.",
     ),
 ]
 
