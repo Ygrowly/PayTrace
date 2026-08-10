@@ -55,6 +55,8 @@ def _db():
     max_retries=2,
     default_retry_delay=30,
     acks_late=False,  # re-deliver if worker crashes before ack
+    soft_time_limit=120,  # seconds — M4 layer 1: raises SoftTimeLimitExceeded
+    time_limit=180,  # seconds — M4 layer 1: hard kill
 )
 def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
     """Execute a single diagnosis run and persist results to the database.

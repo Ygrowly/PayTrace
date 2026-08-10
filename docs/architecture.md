@@ -1,15 +1,82 @@
-# 架构
+# PayTrace Architecture
 
-> 状态：**占位** —— 将在 M0b / M1 / M2 填充。
+## Runtime topology
 
-本文档描述 PayTrace 的运行时架构。
+```text
+Browser (Next.js :3000)
+    │
+    ├── REST /api/v1/* ──────► FastAPI (:8000)
+    │                              │
+    ├── SSE /diagnosis-runs/:id/events ──► FastAPI (LISTEN/NOTIFY)
+    │                              │
+    └── (static pages)            ├── PostgreSQL (control plane)
+                                  ├── Redis (Celery broker/backend)
+                                  ├── MinIO (artifact store)
+                                  └── DuckDB + Parquet (analytics, in-process)
 
-## 计划范围
+                    Celery Worker
+                         │
+                         ├── DiagnosisOrchestrator
+                         │       ├── PaymentAnalyticsSource (DuckDB)
+                         │       ├── 6 read-only diagnostic tools
+                         │       ├── EvidenceLedger
+                         │       ├── ContextBuilder
+                         │       ├── ModelAdapter (RuleBased / OpenAI-compat)
+                         │       └── ReportValidator
+                         │
+                         └── EvaluationRunner
+                                 ├── ScenarioGenerator (5+2 scenarios)
+                                 ├── GroundTruthLoader (isolated)
+                                 └── Metrics (F1, MAE, evidence validity, …)
+```
 
-- 控制面（PostgreSQL）：Incident、DiagnosisRun、Evidence 元数据、Report、EvaluationRun。
-- 分析数据面（DuckDB + Parquet）：支付事件查询、漏斗聚合、维度下钻。
-- 执行面（Celery Worker）：固定诊断 Workflow、工具调用、模型调用、报告校验。
-- 展示面（Next.js）：只读视图、SSE 订阅、Incident 创建触发。
+## Planes
 
-权威架构图与边界见 `PayTrace_Production_MVP_Development_Plan_v0.2.md` § 3，
-各决策的背景见 `docs/adr/`。
+| Plane | Store | Responsibilities |
+|-------|-------|-----------------|
+| Control | PostgreSQL | Incidents, DiagnosisRuns, Events, Evidence, Reports, EvaluationRuns |
+| Analytics | DuckDB + Parquet | Payment events, funnel aggregation, dimension breakdown, benefit gap, payment event inspection, cancel/reorder trace, config changes |
+| Execution | Celery Worker | Diagnosis workflow, tool calls, model calls, report validation, evaluation scoring |
+| Presentation | Next.js | Incident list/detail, diagnosis workbench, Eval Lab, SSE progress, ECharts |
+
+## Key boundaries
+
+- **No DB foreign keys** (ADR 0003): Referential integrity is enforced by service-layer code and integration tests.
+- **Ground Truth isolation**: Only `app/evaluation/` and `app/harness/scenarios/ground_truth.py` may import `GroundTruthLoader`. Diagnosis code never touches GT.
+- **Analytics source abstraction**: Tools depend on `PaymentAnalyticsSource` protocol, never on DuckDB directly.
+- **Model adapter abstraction**: Diagnosis code depends on `ModelAdapter` protocol. `RuleBasedModelAdapter` works without any API key; `OpenAICompatibleModelAdapter` falls back to rules on error.
+
+## Diagnostic workflow (fixed 6-tool)
+
+```text
+validate_dataset
+  → get_payment_funnel
+  → analyze_benefit_gap
+  → inspect_payment_events
+  → trace_cancel_and_reorder
+  → get_config_changes
+  → breakdown_conversion_loss (per anomalous stage × 2 dimensions)
+  → EvidenceLedger → ContextBuilder → ModelAdapter → ReportValidator
+```
+
+Max 7 tool calls (5 base + 2 breakdown), within the 8-call budget.
+
+## Evaluation modes
+
+| Mode | Adapter | Status |
+|------|---------|--------|
+| B0 | RuleBasedModelAdapter | Implemented |
+| B1 | OpenAICompatibleModelAdapter | Implemented (falls back to B0 without key) |
+| B2 | Dynamic tool calling | Not implemented |
+| B3 | Harness + evidence constraints | Not implemented |
+
+## Stale-run recovery (3-layer)
+
+1. Celery `soft_time_limit`/`time_limit` — raises exception, hard-kills if exceeded
+2. Worker startup `worker_ready` scan — force-fails stale non-terminal runs
+3. Celery Beat periodic task (every 5 min) — catches full-worker crash scenarios
+
+## Scenario kinds (7 total)
+
+5 base: `normal`, `benefit_friction`, `channel_timeout`, `mixed_failure`, `data_gap`
+2 adversarial: `adversarial_irrelevant_config`, `adversarial_noise`

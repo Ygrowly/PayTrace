@@ -47,6 +47,8 @@ def _artifact_record(*, run_id: uuid.UUID, artifact_type: str, ref: Any) -> Arti
     bind=True,
     max_retries=0,
     acks_late=False,
+    soft_time_limit=300,  # seconds — evaluation runs multiple scenarios
+    time_limit=420,  # seconds — hard kill
 )
 def run_evaluation_task(self: Any, evaluation_run_id: str) -> dict[str, str]:
     """Execute one EvaluationRun and persist report artifacts/results."""

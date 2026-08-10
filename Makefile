@@ -15,6 +15,8 @@ help:
 	@echo "Infrastructure:"
 	@echo "  make infra-up       Start PostgreSQL, Redis, MinIO"
 	@echo "  make infra-down     Stop backing services"
+	@echo "  make full-up        Start full stack (infra + API + worker + web)"
+	@echo "  make full-down      Stop full stack"
 	@echo "  make migrate        Run Alembic migrations"
 	@echo ""
 	@echo "Application:"
@@ -28,6 +30,24 @@ help:
 	@echo "Quality gates:"
 	@echo "  make lint           Ruff + ESLint"
 	@echo "  make test           Backend pytest + frontend unit tests"
+
+infra-up:
+	@echo "[infra] Starting backing services..."
+	docker compose up -d postgres redis minio minio-init
+	@echo "[infra] Run 'docker compose ps' to verify health."
+
+infra-down:
+	@echo "[infra] Stopping backing services..."
+	docker compose down
+
+full-up:
+	@echo "[full] Starting full stack..."
+	docker compose --profile full up -d --build
+	@echo "[full] Run 'docker compose ps' to verify health."
+
+full-down:
+	@echo "[full] Stopping full stack..."
+	docker compose --profile full down
 
 infra-up:
 	@echo "[infra] Starting backing services..."

@@ -409,3 +409,31 @@ def get_trace(
         .all()
     )
     return events, tools, evidence
+
+
+# ---------------------------------------------------------------------------
+# Stale run recovery (M4, plan § 24.2)
+# ---------------------------------------------------------------------------
+
+_NON_TERMINAL_RUN_STATES = {
+    "RUNNING",
+    "QUEUED",
+    "COLLECTING_EVIDENCE",
+    "GENERATING_REPORT",
+    "VALIDATING",
+}
+
+
+def find_stale_runs(db: Session) -> list[DiagnosisRun]:
+    """Return runs stuck in a non-terminal state with no update."""
+    from datetime import UTC, datetime, timedelta
+
+    cutoff = datetime.now(UTC) - timedelta(minutes=5)
+    return (
+        db.query(DiagnosisRun)
+        .filter(
+            DiagnosisRun.status.in_(_NON_TERMINAL_RUN_STATES),
+            DiagnosisRun.updated_at < cutoff,
+        )
+        .all()
+    )

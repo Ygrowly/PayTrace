@@ -1,6 +1,6 @@
-# PayTrace local infrastructure compose (M0a skeleton).
-# Starts only the backing services: PostgreSQL, Redis, MinIO.
-# API, Celery Worker, and Next.js are run locally for hot reload.
+# PayTrace local infrastructure compose.
+# Default: backing services (PostgreSQL, Redis, MinIO) only.
+# Full stack: `docker compose --profile full up -d`
 
 services:
   postgres:
@@ -70,6 +70,97 @@ services:
       echo 'MinIO bucket initialized.';
       "
     restart: "no"
+
+  # --- Full-stack profile (plan § 25.2) -----------------------------------
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-api
+    profiles: ["full"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-paytrace}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
+      - MINIO_BUCKET=${MINIO_BUCKET:-paytrace}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-rule_based}
+      - MODEL_BASE_URL=${MODEL_BASE_URL:-}
+      - MODEL_API_KEY=${MODEL_API_KEY:-}
+      - MODEL_NAME=${MODEL_NAME:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-worker
+    profiles: ["full"]
+    command:
+      ["uv", "run", "celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-P", "solo"]
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-paytrace}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
+      - MINIO_BUCKET=${MINIO_BUCKET:-paytrace}
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-rule_based}
+      - MODEL_BASE_URL=${MODEL_BASE_URL:-}
+      - MODEL_API_KEY=${MODEL_API_KEY:-}
+      - MODEL_NAME=${MODEL_NAME:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-beat
+    profiles: ["full"]
+    command:
+      ["uv", "run", "celery", "-A", "app.tasks.celery_app", "beat", "-l", "info"]
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: paytrace-web
+    profiles: ["full"]
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
   postgres_data:
