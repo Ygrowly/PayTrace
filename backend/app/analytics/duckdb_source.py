@@ -499,27 +499,22 @@ class DuckDBAnalyticsSource:
             for item in raw:
                 changes.append(ConfigChange(**item))
 
-        # Split by a simple heuristic: changes within 1 day of scenario start
-        # are "baseline_window", later changes are "incident_window".
-        baseline_window: list[ConfigChange] = []
-        incident_window: list[ConfigChange] = []
-        for c in changes:
-            if "baseline" in c.changed_at.lower() or "baseline" in c.change_id.lower():
-                baseline_window.append(c)
-            else:
-                incident_window.append(c)
-
         # Filter by change_types if requested.
         if query.change_types:
             allowed = set(query.change_types)
-            baseline_window = [c for c in baseline_window if c.change_type in allowed]
-            incident_window = [c for c in incident_window if c.change_type in allowed]
+            changes = [c for c in changes if c.change_type in allowed]
+
+        # Payment-relevant change types.  Others (e.g. version_upgrade on
+        # client_ui) are surfaced in the raw change list but NOT flagged as
+        # relevant so the diagnosis adapter does not attribute payment loss
+        # to an unrelated config change.
+        _PAYMENT_RELEVANT = frozenset({"promo_rule", "routing", "risk_control"})
 
         return ConfigChangesResult(
             scenario_id=path.stem,
-            baseline_window_changes=baseline_window,
-            incident_window_changes=incident_window,
-            relevant_changes=incident_window,  # incident-window changes are the relevant ones
+            baseline_window_changes=[],
+            incident_window_changes=changes,
+            relevant_changes=[c for c in changes if c.change_type in _PAYMENT_RELEVANT],
         )
 
     # -- data quality ---------------------------------------------------------

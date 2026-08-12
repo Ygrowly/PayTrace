@@ -231,6 +231,16 @@ def _recommend_actions(
         )
     if EvidenceType.ERROR_CODE_CONCENTRATION in evidence_types:
         actions.append("Investigate concentrated error codes for recurring patterns.")
+    if EvidenceType.CANCEL_REORDER_FLOW in evidence_types:
+        actions.append(
+            "Investigate cancel→reorder→switch flow: review checkout UX friction "
+            "and payment method availability."
+        )
+    if EvidenceType.CONFIG_CHANGE in evidence_types:
+        actions.append(
+            "Correlate configuration changes (promo/routing/risk/version) "
+            "with the incident window — check for unintended side effects."
+        )
     if not actions:
         actions.append("Monitor payment conversion rates for recurrence.")
         actions.append("Consider increasing observation window for statistical significance.")

@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -426,8 +426,6 @@ _NON_TERMINAL_RUN_STATES = {
 
 def find_stale_runs(db: Session) -> list[DiagnosisRun]:
     """Return runs stuck in a non-terminal state with no update."""
-    from datetime import UTC, datetime, timedelta
-
     cutoff = datetime.now(UTC) - timedelta(minutes=5)
     return (
         db.query(DiagnosisRun)

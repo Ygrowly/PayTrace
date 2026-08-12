@@ -60,7 +60,9 @@ class GetPaymentFunnelTool(_BaseTool):
         evidence: list[EvidenceDraft] = []
         warnings: list[str] = []
         for stage in res.anomalous_stages:
-            delta = next(d for d in res.deltas if d.stage == stage)
+            delta = next((d for d in res.deltas if d.stage == stage), None)
+            if delta is None:
+                continue
             evidence.append(
                 EvidenceDraft(
                     evidence_type=EvidenceType.FUNNEL_STAGE_DEGRADATION,
@@ -350,29 +352,24 @@ class GetConfigChangesTool(_BaseTool):
         artifact = self._store_artifact(tool_call_id, "config_changes", res.model_dump())
 
         evidence: list[EvidenceDraft] = []
-        all_changes = res.baseline_window_changes + res.incident_window_changes
-        if all_changes:
-            for c in all_changes:
-                evidence.append(
-                    EvidenceDraft(
-                        evidence_type=EvidenceType.CONFIG_CHANGE,
-                        summary=(
-                            f"[{c.change_type}] {c.target}: "
-                            f"{c.old_value or 'none'} → {c.new_value or 'none'}"
-                        ),
-                        metrics={
-                            "change_type": c.change_type,
-                            "changed_at": c.changed_at,
-                        },
-                        dimensions={"target": c.target},
-                    )
+        for c in res.relevant_changes:
+            evidence.append(
+                EvidenceDraft(
+                    evidence_type=EvidenceType.CONFIG_CHANGE,
+                    summary=(
+                        f"[{c.change_type}] {c.target}: "
+                        f"{c.old_value or 'none'} → {c.new_value or 'none'}"
+                    ),
+                    metrics={
+                        "change_type": c.change_type,
+                        "changed_at": c.changed_at,
+                    },
+                    dimensions={"target": c.target},
                 )
+            )
 
-        summary = (
-            f"Config changes: {len(res.baseline_window_changes)} baseline-window, "
-            f"{len(res.incident_window_changes)} incident-window, "
-            f"{len(res.relevant_changes)} relevant"
-        )
+        all_count = len(res.baseline_window_changes) + len(res.incident_window_changes)
+        summary = f"Config changes: {all_count} total, " f"{len(res.relevant_changes)} relevant"
         return ToolResult(
             tool_call_id=tool_call_id,
             tool_name=self.name,
@@ -380,7 +377,7 @@ class GetConfigChangesTool(_BaseTool):
             summary=summary,
             evidence=evidence,
             artifact_ref=artifact,
-            row_count=len(all_changes),
+            row_count=all_count,
         )
 
 

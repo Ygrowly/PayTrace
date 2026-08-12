@@ -1,17 +1,25 @@
 """Tests for DuckDBAnalyticsSource (plan § 9.1)."""
 
+import json
+
 import pytest
 
 from app.analytics.base import (
     BenefitQuery,
     BreakdownQuery,
+    CancelReorderQuery,
+    ConfigChangesQuery,
     FunnelQuery,
     PaymentAnalyticsSource,
     PaymentEventQuery,
 )
 from app.analytics.duckdb_source import DuckDBAnalyticsSource
 from app.domain.events import FUNNEL_STAGE_ORDER
-from app.harness.scenarios.generator import ScenarioConfig, generate_scenario
+from app.harness.scenarios.generator import (
+    ScenarioConfig,
+    generate_config_changes,
+    generate_scenario,
+)
 from app.harness.scenarios.io import write_dataset
 
 
@@ -23,6 +31,9 @@ def datasets(tmp_path_factory):
     for kind in ("normal", "benefit_friction", "channel_timeout", "mixed_failure", "data_gap"):
         events, _ = generate_scenario(ScenarioConfig(kind=kind, seed=42, num_intents=400))
         refs[kind] = write_dataset(events, root, kind)
+        # Write config changes for get_config_changes method.
+        config_path = root / f"{kind}.config_changes.json"
+        config_path.write_text(json.dumps(generate_config_changes(kind, seed=42)), encoding="utf-8")
     return refs
 
 
@@ -147,6 +158,57 @@ def test_validate_dataset_data_gap_warns(source, datasets):
     assert "CHANNEL_SUCCEEDED" in res.missing_stages
     assert any("missing funnel stages" in w for w in res.warnings)
     assert any("benefit_id null rate" in w for w in res.warnings)
+
+
+# --- trace_cancel_and_reorder ----------------------------------------------------
+
+
+def test_cancel_reorder_normal_clean(source, datasets):
+    res = source.trace_cancel_and_reorder(CancelReorderQuery(dataset_ref=datasets["normal"].path))
+    assert res.baseline.total_intents > 0
+    assert res.incident.total_intents > 0
+    # Normal scenario: minimal cancel rate delta.
+    assert abs(res.deltas.cancel_rate_delta) < 0.05
+
+
+def test_cancel_reorder_benefit_friction_has_delta(source, datasets):
+    res = source.trace_cancel_and_reorder(
+        CancelReorderQuery(dataset_ref=datasets["benefit_friction"].path)
+    )
+    assert res.deltas.cancel_rate_delta > 0
+    assert res.deltas.estimated_extra_cancelled > 0
+    assert res.incident.cancel_rate > res.baseline.cancel_rate
+
+
+# --- get_config_changes ----------------------------------------------------------
+
+
+def test_config_changes_mixed_failure(source, datasets):
+    res = source.get_config_changes(ConfigChangesQuery(dataset_ref=datasets["mixed_failure"].path))
+    assert len(res.incident_window_changes) == 2
+    types = {c.change_type for c in res.incident_window_changes}
+    assert types == {"promo_rule", "routing"}
+
+
+def test_config_changes_normal_empty(source, datasets):
+    res = source.get_config_changes(ConfigChangesQuery(dataset_ref=datasets["normal"].path))
+    assert res.incident_window_changes == []
+    assert res.baseline_window_changes == []
+
+
+def test_config_changes_filter_by_type(source, datasets):
+    res = source.get_config_changes(
+        ConfigChangesQuery(dataset_ref=datasets["mixed_failure"].path, change_types=["routing"])
+    )
+    assert len(res.incident_window_changes) == 1
+    assert res.incident_window_changes[0].change_type == "routing"
+
+
+def test_config_changes_data_gap_returns_empty(source, datasets):
+    """data_gap has no fault-injected config changes — result is empty."""
+    res = source.get_config_changes(ConfigChangesQuery(dataset_ref=datasets["data_gap"].path))
+    assert res.incident_window_changes == []
+    assert res.baseline_window_changes == []
 
 
 def test_validate_dataset_missing_file(source):

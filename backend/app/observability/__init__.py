@@ -6,7 +6,7 @@ context fields: timestamp, level, service, trace_id, request_id, incident_id,
 diagnosis_run_id, duration_ms, error_type.
 
 Usage:
-    from app.observability.logging import get_logger
+    from app.observability import get_logger
     logger = get_logger(__name__)  # same signature as logging.getLogger
 """
 
@@ -69,7 +69,7 @@ def get_logger(name: str) -> logging.Logger:
 
     In a FastAPI handler, augment with::
 
-        from app.observability.logging import add_context
+        from app.observability import add_context
         logger = add_context(logger, trace_id=request.state.trace_id)
     """
     if name not in _LOGGER_CACHE:

@@ -1,4 +1,4 @@
-"""DiagnosisOrchestrator — fixed 4-step workflow (plan § 14.1).
+"""DiagnosisOrchestrator — fixed 6-tool workflow (plan § 14.1).
 
 Ties together DuckDBAnalyticsSource, ToolRegistry, EvidenceLedger,
 ContextBuilder, ModelAdapter, ReportValidator, and one correction retry
@@ -180,7 +180,7 @@ class DiagnosisOrchestrator:
     def _run_tool_pipeline(
         self, dataset_ref: str
     ) -> tuple[EvidenceLedger, list[str], str, list[ToolResult]]:
-        """Execute the fixed-4-tool pipeline and return its trace details."""
+        """Execute the fixed 6-tool pipeline and return its trace details."""
         tools = build_default_tools(self._source, self._artifacts)
         registry = ToolRegistry()
         for t in tools:

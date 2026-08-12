@@ -11,6 +11,7 @@ Layer 3: This periodic beat task — catches the case where the entire worker
 """
 
 import logging
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
 from app.db.models import DiagnosisRun as _DR
@@ -20,9 +21,6 @@ from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-# Runs stuck in a non-terminal RUNNING-family state for longer than this
-# are considered stale and will be force-failed.
-_STALE_MINUTES = 5
 _ACTIVE_DIAGNOSIS = {
     "RUNNING",
     "QUEUED",
@@ -32,14 +30,32 @@ _ACTIVE_DIAGNOSIS = {
 }
 _ACTIVE_EVALUATION = {"RUNNING", "QUEUED"}
 
+# Runs stuck in a non-terminal RUNNING-family state for longer than this
+# are considered stale and will be force-failed.
+# Must be >= _STALE_RUNNING_TIMEOUT_MINUTES in diagnosis.py (10 min) so
+# the periodic scanner does not preempt a legitimately slow diagnosis task.
+_STALE_MINUTES = 10
+
+
+@contextmanager
+def _db():
+    session = session_maker()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
 
 def _do_scan() -> int:
     """Scan and fix stale runs. Returns the number of runs fixed."""
-    session = session_maker()
     cutoff = datetime.now(UTC) - timedelta(minutes=_STALE_MINUTES)
     fixed = 0
 
-    try:
+    with _db() as session:
         # --- DiagnosisRuns ---
         stale_diag = (
             session.query(_DR)
@@ -91,16 +107,6 @@ def _do_scan() -> int:
             run.finished_at = datetime.now(UTC)
             run.updated_at = datetime.now(UTC)
             fixed += 1
-
-        if fixed:
-            session.commit()
-        else:
-            session.rollback()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
 
     return fixed
 

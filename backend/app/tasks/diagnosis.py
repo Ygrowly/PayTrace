@@ -49,6 +49,23 @@ def _db():
 # ---------------------------------------------------------------------------
 
 
+def _log_retry_event(run_id, exc):
+    """Log a retry event to the DB without changing the run status."""
+    try:
+        with _db() as db:
+            run = service.get_run(db, run_id)
+            if run:
+                service.write_event(
+                    db,
+                    diagnosis_run_id=run_id,
+                    event_type="run_retrying",
+                    stage="RUNNING",
+                    message=f"Task will retry after transient error: {type(exc).__name__}",
+                )
+    except Exception:  # noqa: S110 — best-effort logging; must not block the retry
+        pass
+
+
 @celery_app.task(
     name="app.tasks.diagnosis.run_diagnosis",
     bind=True,
@@ -167,24 +184,10 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
         return {"run_id": str(run_id), "status": "FAILED"}
     except Exception as exc:
         logger.exception("run_diagnosis: transient error  run_id=%s", run_id)
-        # Mark as FAILED but allow Celery retry for transient errors.
-        with _db() as db:
-            run = service.get_run(db, run_id)
-            if run:
-                service.update_run_status(
-                    db,
-                    run,
-                    "FAILED",
-                    error_type=type(exc).__name__,
-                    error_message=str(exc)[:2048],
-                )
-                service.write_event(
-                    db,
-                    diagnosis_run_id=run_id,
-                    event_type="run_failed",
-                    stage="FAILED",
-                    message=f"Transient error (will retry): {exc}",
-                )
+        # Do NOT mark the run as FAILED in the DB — Celery will retry
+        # and the task re-checks status on re-entry. A FAILED status
+        # would be terminal and prevent re-execution.
+        _log_retry_event(run_id, exc)
         raise self.retry(exc=exc) from None
 
     # --- Persist results ----------------------------------------------------
