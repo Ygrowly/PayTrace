@@ -429,3 +429,186 @@ deterministic diagnosis tools, and dataset quality validation.
 ### Next
 - Start the API, Celery worker, and frontend, then manually verify the
   Incident and Eval Lab flows in the browser.
+
+---
+
+## 2026-08-10 · Post-M3 · P0 & P1 — B1 adapter, 6-tool workflow, cancel/reorder + config-change scenarios
+
+### Implemented
+- `backend/app/diagnosis/adapter.py` (+246 lines): `OpenAICompatibleModelAdapter`
+  for plan § 15.2. Reads `model_base_url`, `model_api_key`, `model_name`
+  from `Settings`; when the key or base URL is empty, or the upstream call
+  raises, it logs a warning and falls back to `RuleBasedModelAdapter`. Token
+  usage is exposed on `last_usage` for trace/evaluation consumers.
+- `backend/app/diagnosis/prompts.py` (new, 66 lines): `PROMPT_VERSION`,
+  `DIAGNOSIS_SYSTEM_PROMPT_V1`, `DIAGNOSIS_USER_PROMPT_V1`. The OpenAI
+  adapter appends the JSON output schema to the system prompt and requests
+  `response_format={"type": "json_object"}` at `temperature=0.0`.
+- `backend/app/diagnosis/orchestrator.py` (+22 lines): the fixed workflow
+  grew from 4 to 6 tools — `trace_cancel_and_reorder` and `get_config_changes`
+  run unconditionally after `inspect_payment_events`, before the conditional
+  `breakdown_conversion_loss`.
+- `backend/app/tools/diagnostic.py` (+116 lines): the two new read-only tools
+  plus evidence-draft construction for cancel→reorder→switch and
+  config-change signals.
+- `backend/app/harness/scenarios/generator.py` (+94 lines), `ground_truth.py`
+  (+4): deterministic cancel-flow and config-change injection plus Ground
+  Truth fields for the new evidence types.
+- `backend/app/ontology/registry.py` (+10): new evidence types
+  (`CANCEL_REORDER_FLOW`, `CONFIG_CHANGE`) and supporting links/actions.
+- `backend/app/analytics/base.py` (+72), `duckdb_source.py` (+153): new
+  result models and DuckDB queries for cancel/reorder traces and
+  config-change relevance.
+- `backend/app/evaluation/runner.py` (+36), `schemas.py` (B0 → `B0|B1`):
+  B1 branch instantiates `OpenAICompatibleModelAdapter` from settings.
+- Tests: `test_diagnosis_orchestrator.py` (+57), `test_evaluation.py`
+  (+51), `test_scenario_generator.py` (+76), `test_tools.py` (+137) —
+  321 new test lines covering the two new tools, B1 fallback, and the two
+  new scenario kinds.
+- `backend/pyproject.toml` (+1), `uv.lock` (+110): added the `openai`
+  dependency used by `OpenAICompatibleModelAdapter`.
+
+### Verified
+- Verification source: commit `b89cb4d` message (2026-08-12, post-review
+  fix commit) records "107 non-DB tests passed, ruff check clean, ruff
+  format clean, docker compose config validated". That commit ran after
+  P0 & P1 were stabilised and is the closest available evidence that the
+  P0 & P1 test additions pass alongside the rest of the suite.
+- This audit did **not** re-run `pytest`, `ruff`, or `docker compose
+  config`; the result above is cited, not reproduced.
+
+### Deviations
+- `EvaluationRunCreate.model_mode` was widened from `Literal["B0"]` to
+  `Literal["B0", "B1"]` in the same commit, which expanded the public API
+  beyond the M3 acceptance scope (M3 called for B0 only). The Runner
+  still rejects anything outside `{"B0","B1"}`.
+- The orchestrator docstring still described a 4-tool pipeline until
+  `b89cb4d` corrected it — see the 2026-08-12 entry.
+
+### Risks
+- B1 falls back to rule-based on any exception (`# noqa: BLE001`), so a
+  misconfigured `model_base_url` or transient API failure is
+  indistinguishable from a real rule-based run in the persisted report
+  unless `model_name` is inspected. The runner does not record whether
+  fallback fired.
+- The OpenAI adapter swallows all exceptions; downstream consumers cannot
+  tell a network error from a model-side refusal.
+
+### Next
+- Track fallback events in `DiagnosisRunEvent` so B1 reports can be
+  audited for "actually called the model" vs "fell back".
+
+---
+
+## 2026-08-11 · Post-M3 · P2 — Full-stack compose, Dockerfiles, stale-run recovery, observability
+
+### Implemented
+- `Dockerfile.backend` (new, 41 lines), `Dockerfile.frontend` (new, 32
+  lines): container images for the `full` compose profile.
+- `docker-compose.yml` (+97): `api`, `worker`, `beat`, `web` services under
+  the `full` profile; `api`/`worker`/`beat` share the same image and depend
+  on healthy postgres/redis/minio; `web` builds from `Dockerfile.frontend`.
+- `Makefile` (+20): `full-up`, `full-down`, `generate-scenarios`,
+  `evaluate-rule-based` targets (the `e2e` target remains a placeholder).
+- `backend/app/tasks/stale_scan.py` (new, 123 lines): periodic Celery task
+  `scan_stale_runs` that force-fails DiagnosisRuns and EvaluationRuns stuck
+  in `RUNNING`/`QUEUED`/`COLLECTING_EVIDENCE`/`GENERATING_REPORT`/`VALIDATING`
+  beyond the timeout window. Uses a `_db()` contextmanager.
+- `backend/app/tasks/celery_app.py` (+38): `task_soft_time_limit=120`,
+  `task_time_limit=180`; `beat_schedule` runs `scan_stale_runs` every 5
+  minutes (`crontab(minute="*/5")`, `expires=240`); `worker_ready` signal
+  runs an immediate stale scan as layer 2 of the 3-layer recovery.
+- `backend/app/observability/__init__.py` (new, 121 lines): structured
+  logging helpers and Trace ID propagation support.
+- `backend/app/tasks/diagnosis.py` (+2), `tasks/evaluation.py` (+2): emit
+  structured log fields for run lifecycle events.
+- `backend/app/incidents/service.py` (+28): helpers for stale-state
+  recovery and run lifecycle queries.
+- `docs/architecture.md` (+87), `docs/demo-script.md` (+62),
+  `docs/domain-model.md` (+92): substantial content fills replacing prior
+  placeholders.
+
+### Verified
+- Verification source: commit `b89cb4d` message (2026-08-12) records
+  "docker compose config validated" — `compose --profile full` parse is
+  the only P2 verification evidence available from the commit history.
+- This audit did **not** re-run `docker compose config`, build the
+  images, or start the full stack. The compose file was inspected by
+  this audit (see the review report's docker-compose section) and shows
+  the four `full`-profile services with healthy-dependency wiring.
+
+### Deviations
+- The `e2e` Makefile target was left as a placeholder; P2 did not deliver
+  Playwright E2E (see Risks).
+- `docs/architecture.md`, `docs/domain-model.md`, and `docs/demo-script.md`
+  were filled with content but the AI docs (`docs/ai/`) and `rules.md` were
+  not refreshed in the same commit — that drift is being corrected by this
+  audit (see 2026-08-13 entries below).
+
+### Risks
+- No E2E or frontend unit tests were added; `frontend/package.json` still
+  ships the M0b placeholder `test` script.
+- The Beat schedule and `soft_time_limit`/`time_limit` were not
+  exercised against a running worker in P2; only `b89cb4d` later aligned
+  the stale-scan timeout (10 min) with the diagnosis task timeout.
+
+### Next
+- Add E2E and frontend unit tests; run the full stack on a clean
+  environment to verify the Beat schedule and time limits actually fire.
+
+---
+
+## 2026-08-12 · Post-M3 · P0–P2 review fixes — 28 issues across 3 critical, 3 high, 7 medium, 8 low
+
+### Implemented
+- `backend/app/tasks/diagnosis.py`: removed the pre-Celery-retry `FAILED`
+  state update that could deadlock the state machine; cleaned up the
+  retry path.
+- `backend/app/analytics/duckdb_source.py`: config-change relevance now
+  limited to payment-relevant changes (not all changes); removed the
+  fragile string-based window-split heuristic.
+- `backend/app/tasks/stale_scan.py`: timeout aligned to 10 minutes
+  (was 5) so the periodic scanner cannot preempt a legitimately slow
+  diagnosis task whose own timeout is 10 min; standardised on the `_db()`
+  contextmanager pattern.
+- `backend/app/tools/diagnostic.py`: `get_config_changes` now creates
+  evidence only for `relevant_changes`, not all changes; added defensive
+  `next(..., default)` for the anomalous-stage delta lookup.
+- `backend/app/diagnosis/adapter.py`: `RuleBasedModelAdapter` now emits
+  recommended actions for `CANCEL_REORDER_FLOW` and `CONFIG_CHANGE` evidence
+  types.
+- `backend/app/diagnosis/orchestrator.py`: docstring corrected to
+  describe the 6-tool workflow (was still describing the 4-tool pipeline).
+- `backend/app/observability/__init__.py`: docstring import paths fixed.
+- `backend/app/incidents/service.py`: `timedelta` import moved to module
+  level (was imported locally).
+- `backend/tests/test_analytics_source.py` (+64): 6 new tests for
+  cancel/reorder and config-change query paths.
+
+### Verified
+- Verification source: commit `b89cb4d` message records
+  "107 non-DB tests passed, ruff check clean, ruff format clean, docker
+  compose config validated."
+- This audit did **not** re-run `pytest`, `ruff`, or `docker compose
+  config`; the result above is cited verbatim from the commit, not
+  reproduced.
+
+### Deviations
+- The 107-test count is "non-DB" only — PostgreSQL/MinIO integration
+  tests were not in this verification run. Full-suite verification remains
+  outstanding.
+- The audit (this turn) discovered a separate `Makefile` bug — duplicate
+  `infra-up`/`infra-down` targets — that was not flagged in the 28-issue
+  review. Fixed in the 2026-08-13 entry below.
+
+### Risks
+- Without a full-suite run (including PostgreSQL-backed tests), the
+  stale-scan timeout alignment and the diagnosis.py retry-path rewrite
+  are verified only by unit tests, not by an end-to-end worker run.
+- `b89cb4d` is the last commit on `feat/m3-eval-and-product`; M4
+  acceptance (E2E, frontend tests, clean-environment replay) has not
+  been run.
+
+### Next
+- Run the full test suite (including integration tests against the
+  docker-compose stack) and proceed to the remaining M4 items.

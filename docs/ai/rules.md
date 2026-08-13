@@ -87,8 +87,11 @@ Alembic 通过 `backend/migrations/env.py` 使用 `app.config` 的数据库配�
 运行时 `DatasetRef` 只指向 Parquet 事件数据；Ground Truth 使用独立
 `GroundTruthLoader` 文件。评测先使用同一诊断编排器运行场景，再读取 Ground
 Truth 评分；Ground Truth 不进入 `DiagnosisContext` 或 ModelAdapter 输入。
-当前生成器登记五类场景：`normal`、`benefit_friction`、`channel_timeout`、
-`mixed_failure`、`data_gap`；相同 kind/seed 应保持可复现。
+当前生成器登记七类场景：`normal`、`benefit_friction`、`channel_timeout`、
+`mixed_failure`、`data_gap`、`adversarial_irrelevant_config`、
+`adversarial_noise`；相同 kind/seed 应保持可复现。后两类 adversarial
+场景故意制造不应该是真实根因的信号（无关配置变更、噪声），用于
+检验模型是否会过度归因。
 
 证据：`backend/app/harness/scenarios/io.py:DatasetRef`、
 `ground_truth.py:GroundTruthLoader`、`generator.py:SCENARIO_KINDS` 与
@@ -96,13 +99,19 @@ Truth 评分；Ground Truth 不进入 `DiagnosisContext` 或 ModelAdapter 输入
 `backend/app/diagnosis/context.py:ContextBuilder`、
 `backend/tests/test_scenario_generator.py`、`backend/tests/test_evaluation.py`。
 
-## 8. 当前评测公开模式只有 B0
+## 8. 评测公开模式为 B0 与 B1
 
-评测 API 的 `model_mode` 是 `Literal["B0"]`；Runner 对非 `B0` 抛出配置错误。
-因此不能把模型模式、付费模型调用或 B1 描述为当前已实现能力。
+评测 API 的 `model_mode` 是 `Literal["B0", "B1"]`；Runner 接受两种模式。
+B0 使用 `RuleBasedModelAdapter`（确定性、无外部依赖）；B1 使用
+`OpenAICompatibleModelAdapter`，当 `model_api_key` 或 `model_base_url` 为空
+或上游调用失败时降级到 `RuleBasedModelAdapter`。因此不能把 B1 描述为"一定
+调用真实 LLM"；只有在配置了有效 `model_api_key` 且 `model_base_url` 可达时
+B1 才实际调用模型。也不能把无 key 下的 B1 运行结果描述为"真实模型评测"。
 
 证据：`backend/app/evaluation/schemas.py:EvaluationRunCreate`、
 `backend/app/evaluation/runner.py:_validate_config`、
+`runner.py:run_evaluation` 的 B1 分支、
+`backend/app/diagnosis/adapter.py:OpenAICompatibleModelAdapter`、
 `backend/scripts/evaluate_rule_based.py`、`docs/api.md:Evaluation Lab`。
 
 ## 9. Artifact 通过受限 Key 和校验和访问

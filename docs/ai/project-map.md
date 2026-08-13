@@ -18,9 +18,9 @@
 | `backend/app/ontology/` | Code-first Ontology 注册表与版本 | `ontology/registry.py:REGISTRY`、`ONTOLOGY_VERSION` |
 | `backend/app/analytics/` | `PaymentAnalyticsSource` 协议与 Parquet/DuckDB 实现 | `analytics/base.py`、`analytics/duckdb_source.py` |
 | `backend/app/harness/` | 确定性场景、Parquet DatasetRef、隔离 Ground Truth、ArtifactStore | `harness/scenarios/`、`harness/artifact_store.py` |
-| `backend/app/tools/` | 四个只读诊断工具、工具注册表、调用预算、EvidenceLedger | `tools/base.py`、`tools/diagnostic.py` |
+| `backend/app/tools/` | 六个只读诊断工具（含 `trace_cancel_and_reorder`、`get_config_changes`）、工具注册表、调用预算、EvidenceLedger | `tools/base.py`、`tools/diagnostic.py` |
 | `backend/app/evaluation/` | B0 评测 Runner、指标、报告模型、持久化 Service、API Schema | `evaluation/runner.py`、`metrics.py`、`models.py`、`service.py`、`schemas.py` |
-| `backend/app/tasks/` | Celery 应用、heartbeat、诊断任务、评测任务 | `tasks/celery_app.py` 的 `include` 列表与两个任务文件 |
+| `backend/app/tasks/` | Celery 应用、heartbeat、诊断任务、评测任务、stale 扫描任务；Beat 每 5 分钟调度 stale-run 恢复 | `tasks/celery_app.py` 的 `include` 列表与四个任务文件、`tasks/stale_scan.py:scan_stale_runs` |
 | `backend/tests/` | 单元、API、PostgreSQL 条件集成、MinIO 条件集成测试 | `pyproject.toml` 的 `testpaths = ["tests"]` 与测试文件集合 |
 | `frontend/app/` | Next.js App Router：首页、Incident 列表/详情、Eval Lab | `app/page.tsx`、`app/incidents/`、`app/eval/page.tsx` |
 | `frontend/components/`、`frontend/hooks/` | 工作台组件、ECharts 图表、React Query Provider、诊断 SSE Hook | `components/` 文件集合、`hooks/use-diagnosis-events.ts` |
@@ -61,8 +61,10 @@ Breakdown、Benefit、Payment Event、DatasetValidation 结果模型。
 `backend/app/diagnosis/orchestrator.py` 的固定执行顺序是：
 
 1. `validate_dataset()`；
-2. `get_payment_funnel`、`analyze_benefit_gap`、`inspect_payment_events`，
-   发现异常阶段时再按两个维度执行 `breakdown_conversion_loss`；
+2. 固定 6 工具流水线：`get_payment_funnel` → `analyze_benefit_gap` →
+   `inspect_payment_events` → `trace_cancel_and_reorder` →
+   `get_config_changes` →（仅在发现异常阶段时按两个维度执行）
+   `breakdown_conversion_loss`；
 3. `ContextBuilder` 组装证据摘要；
 4. `ModelAdapter` 生成报告，`ReportValidator` 校验并最多做一次修正重试。
 
@@ -99,7 +101,7 @@ EvaluationRun 并下载 JSON/Markdown 报告。
   POST /api/v1/incidents/{incident_id}/diagnosis-runs
     -> Idempotency-Key + PostgreSQL DiagnosisRun
     -> QUEUED -> Celery run_diagnosis
-    -> DiagnosisOrchestrator -> PaymentAnalyticsSource -> 四个只读工具
+    -> DiagnosisOrchestrator -> PaymentAnalyticsSource -> 六个只读工具
     -> EvidenceLedger -> DiagnosisContext -> RuleBasedModelAdapter -> Validator
     -> PostgreSQL RunEvent / ToolExecution / Evidence / Report
     -> 前端轮询状态 + Last-Event-ID SSE + 报告/证据/Trace
@@ -108,7 +110,7 @@ EvaluationRun 并下载 JSON/Markdown 报告。
   POST /api/v1/evaluation-runs
     -> Idempotency-Key + PostgreSQL EvaluationRun
     -> Celery run_evaluation_task
-    -> 逐个生成五类场景并复用 DiagnosisOrchestrator
+    -> 逐个生成七类场景并复用 DiagnosisOrchestrator
     -> 诊断完成后加载 Ground Truth 并评分
     -> PostgreSQL 指标/场景结果/badcase
     -> LocalArtifactStore 写入 JSON/Markdown 报告
