@@ -98,4 +98,13 @@ evaluate-rule-based:
 	cd backend && uv run python scripts/evaluate_rule_based.py
 
 e2e:
-	@echo "[placeholder] Playwright E2E arrives in M3/M4."
+	@echo "[e2e] Running browser-use E2E tests."
+	@echo "[e2e] Prerequisites (must already be running):"
+	@echo "[e2e]   make infra-up && make migrate"
+	@echo "[e2e]   make run-api   (terminal 1)"
+	@echo "[e2e]   make run-worker (terminal 2)"
+	@echo "[e2e]   make run-web   (terminal 3)"
+	@echo "[e2e]   .env with MODEL_API_KEY/MODEL_BASE_URL/MODEL_NAME"
+	@echo "[e2e]   uv sync --extra dev --extra e2e (one-time)"
+	@echo ""
+	cd backend && uv run pytest tests/e2e/ -m e2e -o "addopts=" -v

@@ -147,8 +147,23 @@ def test_ground_truth_is_loaded_after_diagnosis(monkeypatch, tmp_path) -> None:
 # --- B1 model mode ----------------------------------------------------------------
 
 
-def test_b1_mode_falls_back_to_rule_based_when_no_api_key(tmp_path) -> None:
-    """B1 with no API key must fall back to RuleBasedModelAdapter and succeed."""
+def test_b1_mode_falls_back_to_rule_based_when_no_api_key(monkeypatch, tmp_path) -> None:
+    """B1 with no API key must fall back to RuleBasedModelAdapter and succeed.
+
+    The test forces empty credentials via monkeypatch so that the fallback
+    path is exercised deterministically, regardless of what .env contains.
+    Without this, a real MODEL_API_KEY in .env would make B1 actually call
+    the LLM, producing non-deterministic results and violating the rule
+    that tests must not call paid external services.
+    """
+
+    class _EmptyModelSettings:
+        model_base_url = ""
+        model_api_key = ""
+        model_name = ""
+
+    monkeypatch.setattr("app.evaluation.runner.get_settings", lambda: _EmptyModelSettings())
+
     result = run_evaluation(
         evaluation_run_id="eval-b1-fallback",
         model_mode="B1",
