@@ -125,10 +125,16 @@ ArtifactStore 对 Key 做白名单清洗并拒绝路径穿越；写入记录 SHA
 `backend/tests/test_artifact_store.py`、`backend/app/api/v1/diagnosis.py`、
 `backend/app/api/v1/evaluations.py`。
 
-## 10. 前端 `pnpm test` 目前不是单元测试门禁
+## 10. 前端 `pnpm test` 不是单元测试门禁；E2E 用 browser-use 且不进 CI
 
-前端真实可执行的现有质量脚本是 `lint`、`typecheck`、`build`；`pnpm test` 当前
-只打印 placeholder 并退出 0。因此不能用它证明前端行为已被单元测试覆盖。
+前端质量脚本是 `lint`、`typecheck`、`build`；`pnpm test` 仍是 placeholder，
+不能证明前端行为被单元测试覆盖。M4 新增 browser-use 驱动的 E2E 测试
+（`backend/tests/e2e/`，`e2e` marker），由 `addopts = "-m 'not e2e'"`
+排除在默认 pytest 之外，CI 不运行。E2E 需要运行中的 stack（API/Worker/
+Web）+ `MODEL_API_KEY` + 系统 Chrome，通过 `make e2e` 手动运行；
+prerequisites 不满足时整组 skip。E2E 由 LLM 驱动，结果非确定性，不能
+作为唯一验收依据。
 
-证据：`frontend/package.json:scripts`、`Makefile:frontend-test`、
-`.github/workflows/ci.yml:frontend`、`frontend/app/` 当前页面实现。
+证据：`frontend/package.json:scripts`、`backend/tests/e2e/conftest.py`
+（gates 与 `_find_chrome`）、`backend/pyproject.toml` 的 `markers` 与
+`addopts`、`Makefile:e2e`、`.github/workflows/ci.yml:frontend`。

@@ -612,3 +612,113 @@ deterministic diagnosis tools, and dataset quality validation.
 ### Next
 - Run the full test suite (including integration tests against the
   docker-compose stack) and proceed to the remaining M4 items.
+
+---
+
+## 2026-08-13 · M4 (partial) · browser-use E2E framework + dependency upgrade
+
+### Implemented
+- `backend/tests/e2e/` — browser-use driven E2E suite:
+  - `conftest.py` — collection-time prerequisite gates (browser_use
+    importable, `MODEL_API_KEY` set, API + Web reachable) that skip the
+    whole suite when unmet; `_find_chrome()` locates Chrome/Edge on
+    Windows and passes `executable_path` explicitly (browser-use
+    auto-detection times out on Windows); `e2e_llm` wires
+    `ChatOpenAI(model/ api_key/ base_url from app Settings)` with
+    `dont_force_structured_output=True` (required — DeepSeek returns
+    HTTP 400 for `response_format`); `e2e_browser` yields a headless
+    `Browser` and closes it in teardown.
+  - `test_smoke.py` — 3 LLM-driven smoke tests (homepage, /incidents,
+    /eval) that ask the agent to return a small JSON and assert on the
+    parsed result.
+- `backend/pyproject.toml`:
+  - new `e2e` extra: `browser-use>=0.13.0,<0.14.0`;
+  - pytest `markers = ["e2e: ..."]` and `addopts = "-m 'not e2e'"` so
+    the default `pytest -q` (dev + CI) deselects E2E;
+  - core dependency constraints widened to accommodate browser-use
+    0.13.x pins: `pydantic>=2.9,<2.13` (was <2.10),
+    `pydantic-settings>=2.5,<2.9` (was <2.6), `openai>=1.60,<3.0`
+    (was <2.0), `uvicorn>=0.30,<0.33` (was <0.31), `httpx>=0.27,<0.29`
+    (was <0.28, dev extra).
+- `Makefile` — `e2e` target now runs
+  `uv run pytest tests/e2e/ -m e2e -o "addopts=" -v` after printing
+  the required prerequisites (replaces the M3 placeholder).
+- `backend/tests/test_evaluation.py` —
+  `test_b1_mode_falls_back_to_rule_based_when_no_api_key` now
+  monkeypatches `app.evaluation.runner.get_settings` to return empty
+  model credentials. Root cause of the prior flake: `.env` contains a
+  real `MODEL_API_KEY`, so B1 actually called the LLM (DeepSeek) — the
+  openai 1.x→2.x upgrade changed the call from "error → fallback" to
+  "success → LLM output", and the LLM's non-deterministic answer broke
+  the test. The test now exercises the fallback path deterministically.
+- `backend/openapi.json` + `frontend/lib/api/schema.ts` regenerated:
+  the old artifacts predated the B0→B1 `model_mode` change (P0 & P1)
+  and pydantic 2.12 alters schema emission (removes some `enum`/
+  `const` blocks, adds `additionalProperties: true`).
+- `frontend/app/eval/page.tsx` — `asBadcase` parameter type changed
+  from `Record<string, never>` to `{ [key: string]: unknown }` to match
+  the regenerated schema (pydantic 2.12 emits `additionalProperties:
+  true` for the badcases list items).
+
+### Verified
+- `uv run ruff check .` → All checks passed!;
+  `uv run ruff format --check .` → 89 files already formatted.
+- `uv run pytest -q` → **151 passed, 3 deselected** (the 3 E2E smoke
+  tests deselected via addopts), 6 warnings, 13.86s. Previously the
+  suite took ~78s because the B1 test called DeepSeek; after the
+  monkeypatch fix it is deterministic and fast.
+- E2E skip gates: `uv run pytest tests/e2e/ -m e2e -o "addopts=" -v`
+  with the stack down → 3 skipped (prerequisite reasons).
+- E2E smoke against a live stack: started API on :8001 and
+  `pnpm dev` with `PAYTRACE_API_BASE`/`NEXT_PUBLIC_PAYTRACE_API_BASE`
+  pointing at :8001 (port 8000 was already occupied by an unrelated
+  anaconda python process, left untouched), then
+  `E2E_API_URL=http://localhost:8001 uv run pytest tests/e2e/ -m e2e -o "addopts=" -v`
+  → **3 passed in 112.59s** (homepage, incidents list, eval lab).
+- Contract drift after regen: `pnpm typecheck` → passed;
+  `pnpm build` → passed (4 routes); `pnpm lint` → passed.
+- `docker compose` services stayed healthy throughout (postgres, redis,
+  minio).
+
+### Deviations
+- **Core dependency upgrades** (user-confirmed): pydantic 2.9→2.12,
+  openai 1.x→2.x, uvicorn 0.30→0.32, httpx 0.27→0.28 were required
+  because every browser-use release (0.6.3–0.13.7) requires
+  `pydantic>=2.11.5` and 0.13.x pins `openai==2.16.0`, `httpx==0.28.1`,
+  `uvicorn>=0.31.1` transitively via `mcp==1.26.0`.
+- **E2E port**: local port 8000 is occupied by an unrelated anaconda
+  python process; the E2E run above used :8001 with
+  `E2E_API_URL`/`PAYTRACE_API_BASE` overrides. The Makefile `e2e`
+  target still defaults to :8000 — a future dev-session run on this
+  machine needs the same override or the port must be freed.
+- **browser-use internals depend on LangChain core** (indirectly, via
+  its `ChatOpenAI` model classes). Plan § 0.7 forbids LangChain as an
+  *agent orchestration framework*; browser-use is used here only as an
+  E2E driver, and the agent loop is browser-use's, not LangChain's.
+  Recorded here to keep the dependency boundary explicit.
+- **next-env.d.ts**: `pnpm build` rewrites
+  `frontend/next-env.d.ts` (dev→build routes path); reverted after each
+  build as an untracked-in-intent side effect.
+
+### Risks
+- E2E is LLM-driven and non-deterministic by design; a passing run is
+  evidence the pages render, not a regression gate. The JSON extraction
+  in `test_smoke.py` tolerates malformed output by failing loudly, but
+  flaky LLM answers remain possible.
+- `uv.lock` grew by ~5,000 lines (browser-use's dependency tree
+  includes mcp, google-genai, anthropic, groq, posthog, etc.). This
+  expands the supply-chain surface substantially for an E2E-only
+  extra; consider re-pinning after the next browser-use release.
+- B1 evaluation with a real `MODEL_API_KEY` still calls the paid LLM
+  outside the test suite; only the *fallback* path is covered by
+  automated tests. A real-model B1 evaluation remains unverified.
+- The `.env` `MODEL_API_KEY` was read during debugging (grep of `.env`
+  while diagnosing the B1 test failure). It was not committed, but the
+  user should consider rotating it since it appeared in session output.
+
+### Next
+- User manually runs `make e2e` on a clean full-stack session to
+  confirm the standard (port 8000) path.
+- Optional: `make full-up` containerised E2E run; add E2E tests for the
+  incident-create → diagnosis → report flow.
+- Rotate the `.env` DeepSeek key if the session output is not trusted.
