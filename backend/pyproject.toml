@@ -9,18 +9,18 @@ authors = [
 ]
 dependencies = [
     "fastapi>=0.115.0,<0.116.0",
-    "uvicorn[standard]>=0.30.0,<0.31.0",
+    "uvicorn[standard]>=0.30.0,<0.33.0",
     "sqlalchemy[asyncio]>=2.0.36,<2.1.0",
     "alembic>=1.13.0,<1.14.0",
     "psycopg[binary]>=3.2.0,<3.3.0",
     "celery[redis]>=5.4.0,<5.5.0",
     "redis>=5.0.0,<6.0.0",
     "boto3>=1.35.0,<1.36.0",
-    "pydantic>=2.9.0,<2.10.0",
-    "pydantic-settings>=2.5.0,<2.6.0",
+    "pydantic>=2.9.0,<2.13.0",
+    "pydantic-settings>=2.5.0,<2.9.0",
     "duckdb>=1.1.0,<1.2.0",
     "pyarrow>=17.0.0,<18.0.0",
-    "openai>=1.60.0,<2.0.0",
+    "openai>=1.60.0,<3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -28,7 +28,13 @@ dev = [
     "ruff>=0.7.0,<0.8.0",
     "pytest>=8.3.0,<8.4.0",
     "pytest-asyncio>=0.24.0,<0.25.0",
-    "httpx>=0.27.0,<0.28.0",
+    "httpx>=0.27.0,<0.29.0",
+]
+# E2E browser tests driven by browser-use (M4). Not installed by default;
+# install with `uv sync --extra dev --extra e2e`. Tests carry the `e2e`
+# marker and are excluded from the default pytest run via addopts.
+e2e = [
+    "browser-use>=0.13.0,<0.14.0",
 ]
 
 [build-system]
@@ -70,3 +76,10 @@ select = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    "e2e: browser-use E2E tests requiring a running stack + LLM (run with: pytest -m e2e tests/e2e/)",
+]
+# Default: exclude e2e tests so `pytest -q` (CI + dev) stays deterministic
+# and does not require browser-use, Playwright browsers, or an LLM key.
+# `make e2e` overrides this with an explicit `-m e2e`.
+addopts = "-m 'not e2e'"
