@@ -129,6 +129,33 @@ class TestDiagnosisRunService:
         assert run.status == "QUEUED"
         assert run.celery_task_id == "task-1"
 
+    def test_running_to_succeeded_transition(self, db_session: Session) -> None:
+        """RUNNING → SUCCEEDED must be legal: the worker executes the whole
+        diagnosis synchronously inside RUNNING and then lands on the final
+        status directly (regression: this transition was rejected, leaving
+        every diagnosis run stuck in RUNNING)."""
+        inc = _make_incident(db_session)
+        run, _ = service.create_or_get_run(db_session, inc.id, "ik-run-succeed")
+        db_session.flush()
+
+        service.update_run_status(db_session, run, "QUEUED")
+        service.update_run_status(db_session, run, "RUNNING")
+        service.update_run_status(db_session, run, "SUCCEEDED")
+        assert run.status == "SUCCEEDED"
+        assert run.finished_at is not None
+
+    def test_running_to_needs_data_transition(self, db_session: Session) -> None:
+        """RUNNING → NEEDS_DATA must be legal (data-gap diagnosis outcome)."""
+        inc = _make_incident(db_session)
+        run, _ = service.create_or_get_run(db_session, inc.id, "ik-run-needs")
+        db_session.flush()
+
+        service.update_run_status(db_session, run, "QUEUED")
+        service.update_run_status(db_session, run, "RUNNING")
+        service.update_run_status(db_session, run, "NEEDS_DATA")
+        assert run.status == "NEEDS_DATA"
+        assert run.finished_at is not None
+
     def test_invalid_state_transition_raises(self, db_session: Session) -> None:
         inc = _make_incident(db_session)
         run, _ = service.create_or_get_run(db_session, inc.id, "ik-bad")

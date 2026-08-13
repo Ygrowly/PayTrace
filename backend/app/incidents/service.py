@@ -35,11 +35,21 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # Allowed transitions (from_status → {to_status, ...})
+# RUNNING may go straight to SUCCEEDED/NEEDS_DATA because the current
+# worker executes the whole diagnosis synchronously inside RUNNING;
+# COLLECTING_EVIDENCE/GENERATING_REPORT/VALIDATING remain reserved for a
+# future async, stage-emitting orchestrator.
 _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "PENDING": {"DISPATCH_FAILED", "QUEUED", "CANCELLED"},
     "DISPATCH_FAILED": {"QUEUED", "CANCELLED"},
     "QUEUED": {"RUNNING", "FAILED", "CANCELLED"},
-    "RUNNING": {"COLLECTING_EVIDENCE", "FAILED", "CANCELLED"},
+    "RUNNING": {
+        "SUCCEEDED",
+        "NEEDS_DATA",
+        "COLLECTING_EVIDENCE",
+        "FAILED",
+        "CANCELLED",
+    },
     "COLLECTING_EVIDENCE": {"GENERATING_REPORT", "FAILED", "CANCELLED"},
     "GENERATING_REPORT": {"VALIDATING", "FAILED", "CANCELLED"},
     "VALIDATING": {"SUCCEEDED", "NEEDS_DATA", "FAILED", "CANCELLED"},
