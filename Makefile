@@ -49,15 +49,6 @@ full-down:
 	@echo "[full] Stopping full stack..."
 	docker compose --profile full down
 
-infra-up:
-	@echo "[infra] Starting backing services..."
-	docker compose up -d postgres redis minio minio-init
-	@echo "[infra] Run 'docker compose ps' to verify health."
-
-infra-down:
-	@echo "[infra] Stopping backing services..."
-	docker compose down
-
 # --- Backend ----------------------------------------------------------------
 migrate:
 	cd backend && uv run alembic upgrade head

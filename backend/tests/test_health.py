@@ -25,7 +25,9 @@ async def test_health_ontology_returns_v1_registry() -> None:
     body = resp.json()
     assert body["version"] == "paytrace.ontology.v1"
     assert len(body["objects"]) == 13
-    assert len(body["evidence_types"]) == 6
+    # 8 = 6 original evidence types (M1) + CANCEL_REORDER_FLOW + CONFIG_CHANGE
+    # added in P0 & P1 alongside the two new diagnostic tools.
+    assert len(body["evidence_types"]) == 8
 
 
 async def test_openapi_declares_core_paths() -> None:
