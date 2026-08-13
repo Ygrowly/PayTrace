@@ -372,7 +372,6 @@ export interface components {
              * Ontology Version
              * @default paytrace.ontology.v1
              * @constant
-             * @enum {string}
              */
             ontology_version: "paytrace.ontology.v1";
         };
@@ -460,7 +459,9 @@ export interface components {
             /** Message */
             message: string | null;
             /** Payload */
-            payload: Record<string, never> | null;
+            payload: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Created At
              * Format: date-time
@@ -584,7 +585,6 @@ export interface components {
              * Ontology Version
              * @default paytrace.ontology.v1
              * @constant
-             * @enum {string}
              */
             ontology_version: "paytrace.ontology.v1";
         };
@@ -619,10 +619,9 @@ export interface components {
             /**
              * Model Mode
              * @default B0
-             * @constant
              * @enum {string}
              */
-            model_mode: "B0";
+            model_mode: "B0" | "B1";
             /**
              * Prompt Version
              * @default rule-based.v1
@@ -683,7 +682,9 @@ export interface components {
             /** Scenario Results */
             scenario_results: components["schemas"]["ScenarioResult"][] | null;
             /** Badcases */
-            badcases: Record<string, never>[] | null;
+            badcases: {
+                [key: string]: unknown;
+            }[] | null;
             /** Report Json Key */
             report_json_key: string | null;
             /** Report Markdown Key */
@@ -744,9 +745,13 @@ export interface components {
             /** Summary */
             summary: string;
             /** Metrics */
-            metrics: Record<string, never> | null;
+            metrics: {
+                [key: string]: unknown;
+            } | null;
             /** Filters */
-            filters: Record<string, never> | null;
+            filters: {
+                [key: string]: unknown;
+            } | null;
             /** Artifact Id */
             artifact_id: string | null;
             /**
@@ -760,7 +765,7 @@ export interface components {
          * @description Kinds of deterministic evidence a tool may produce.
          * @enum {string}
          */
-        EvidenceType: "FUNNEL_STAGE_DEGRADATION" | "DIMENSION_CONTRIBUTION" | "BENEFIT_GAP_FRICTION" | "CHANNEL_TIMEOUT" | "ERROR_CODE_CONCENTRATION" | "DATA_GAP";
+        EvidenceType: "FUNNEL_STAGE_DEGRADATION" | "DIMENSION_CONTRIBUTION" | "BENEFIT_GAP_FRICTION" | "CHANNEL_TIMEOUT" | "ERROR_CODE_CONCENTRATION" | "DATA_GAP" | "CANCEL_REORDER_FLOW" | "CONFIG_CHANGE";
         /** EvidenceTypeDefinition */
         EvidenceTypeDefinition: {
             evidence_type: components["schemas"]["EvidenceType"];
@@ -770,7 +775,6 @@ export interface components {
              * Ontology Version
              * @default paytrace.ontology.v1
              * @constant
-             * @enum {string}
              */
             ontology_version: "paytrace.ontology.v1";
         };
@@ -946,7 +950,6 @@ export interface components {
              * Ontology Version
              * @default paytrace.ontology.v1
              * @constant
-             * @enum {string}
              */
             ontology_version: "paytrace.ontology.v1";
         };
@@ -960,7 +963,6 @@ export interface components {
             /**
              * Status
              * @constant
-             * @enum {string}
              */
             status: "ok";
         };
@@ -976,7 +978,6 @@ export interface components {
              * Ontology Version
              * @default paytrace.ontology.v1
              * @constant
-             * @enum {string}
              */
             ontology_version: "paytrace.ontology.v1";
         };
@@ -989,7 +990,6 @@ export interface components {
              * Ontology Version
              * @default paytrace.ontology.v1
              * @constant
-             * @enum {string}
              */
             ontology_version: "paytrace.ontology.v1";
         };
@@ -1007,7 +1007,6 @@ export interface components {
              * Version
              * @default paytrace.ontology.v1
              * @constant
-             * @enum {string}
              */
             version: "paytrace.ontology.v1";
             /** Objects */
@@ -1166,9 +1165,13 @@ export interface components {
             /** Recommended Actions */
             recommended_actions?: string[];
             /** Evidence */
-            evidence?: Record<string, never>[];
+            evidence?: {
+                [key: string]: unknown;
+            }[];
             /** Tool Trace */
-            tool_trace?: Record<string, never>[];
+            tool_trace?: {
+                [key: string]: unknown;
+            }[];
             /** Badcases */
             badcases?: ("STAGE_MISS" | "STAGE_FALSE_POSITIVE" | "ROOT_CAUSE_MISS" | "ROOT_CAUSE_FALSE_POSITIVE" | "UNSUPPORTED_CLAIM" | "LOSS_ATTRIBUTION_ERROR" | "RUN_FAILURE" | "DATA_GAP_MISS")[];
         };

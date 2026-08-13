@@ -15,7 +15,7 @@ const terminalStatuses = new Set(["SUCCEEDED", "FAILED", "CANCELLED"]);
 type Badcase = { scenario_kind?: string; categories?: string[]; summary?: string };
 type ScenarioResult = NonNullable<EvaluationRun["scenario_results"]>[number];
 
-function asBadcase(value: Record<string, never>): Badcase {
+function asBadcase(value: { [key: string]: unknown }): Badcase {
   return value as unknown as Badcase;
 }
 
