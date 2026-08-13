@@ -43,12 +43,15 @@ def _find_chrome() -> str | None:
     return None
 
 
-def _reachable(url: str, timeout: float = 2.0) -> bool:
-    try:
-        resp = httpx.get(url, timeout=timeout)
-    except Exception:  # noqa: BLE001 — any failure means "not reachable"
-        return False
-    return resp.status_code < 400
+def _reachable(url: str, timeout: float = 5.0, attempts: int = 2) -> bool:
+    for _ in range(attempts):
+        try:
+            resp = httpx.get(url, timeout=timeout)
+            if resp.status_code < 400:
+                return True
+        except Exception:  # noqa: BLE001, S110 — any failure means "not reachable"
+            pass
+    return False
 
 
 def _check_gates() -> list[str]:
