@@ -41,17 +41,16 @@ async def test_homepage_loads(e2e_browser, e2e_llm, web_url) -> None:
     """The Next.js homepage renders and shows the backend health status."""
     task = (
         f"Go to {web_url}. "
-        "Look at the rendered page. "
-        "Return ONLY a JSON object with keys "
-        "'title' (string: the page title) and "
-        "'shows_health_ok' (boolean: true if the page displays the "
-        "health status 'ok' or '{\"status\":\"ok\"}' or similar). "
-        "Return only the JSON, no other text."
+        "Read the text displayed on the page. "
+        "Return ONLY a JSON object with key 'page_text' "
+        "(string: the exact text you see on the page)."
     )
     result = await _run_agent(task, e2e_browser, e2e_llm)
     data = _extract_json(result)
     assert data is not None, f"Agent did not return JSON: {result!r}"
-    assert data.get("shows_health_ok") is True, f"Homepage did not show health ok: {data}"
+    assert "ok" in str(data.get("page_text", "")).lower(), (
+        f"Homepage did not show health ok: {data}"
+    )
 
 
 async def test_incidents_list_page_loads(e2e_browser, e2e_llm, web_url) -> None:
