@@ -722,3 +722,97 @@ deterministic diagnosis tools, and dataset quality validation.
 - Optional: `make full-up` containerised E2E run; add E2E tests for the
   incident-create → diagnosis → report flow.
 - Rotate the `.env` DeepSeek key if the session output is not trusted.
+
+---
+
+## 2026-08-13~14 · M4 (closure) · E2E diagnosis flow, worker bug fixes, B1 eval, CI green
+
+### Implemented
+- `backend/tests/e2e/test_diagnosis_flow.py` — E2E diagnosis flow test:
+  API creates a simulated incident, triggers diagnosis, polls to a
+  terminal state (deterministic half), then browser-use verifies the
+  detail-page report and the incidents list (LLM half).
+- `backend/tests/e2e/helpers.py` — shared `run_agent`/`extract_json`.
+- `backend/tests/e2e/conftest.py` — `_reachable` now retries twice with
+  a 5s timeout (was one 2s attempt) to avoid transient skips.
+- `backend/app/incidents/service.py` — diagnosis state machine now
+  allows `RUNNING → SUCCEEDED/NEEDS_DATA`.
+- `backend/migrations/versions/20260813_0004_relax_root_cause_category.py`
+  — `root_cause_findings.category` dropped NOT NULL to match the ORM.
+- `backend/tests/test_incidents_api.py` — 2 regression tests for the
+  new RUNNING transitions.
+- `backend/tests/conftest.py` — module-level `pytestmark =
+  skipif(...)` is NOT applied by pytest 8.3.5 (verified with a minimal
+  repro), so DB tests were previously run — not skipped — when PG was
+  unreachable. Replaced with `pytest_collection_modifyitems` that adds
+  a skip marker to all items when the PG probe fails.
+- PR #1 opened against `master` (remote default branch is `main`,
+  which shares no history with this branch).
+
+### Verified
+- **Two worker-blocking bugs found by the E2E flow test and fixed**:
+  1. `Invalid state transition: RUNNING → SUCCEEDED` — every real
+     diagnosis task crashed and stayed RUNNING until the stale scanner
+     force-failed it (10 min later).
+  2. `NotNullViolation` on `root_cause_findings.category` — normal
+     scenarios (category=None) crashed `persist_report`.
+  After both fixes the E2E flow test's deterministic half passes
+  (run reaches SUCCEEDED; detail-page and list verification pass on
+  runs where the LLM output parses).
+- Stale-run recovery (task 2): controlled experiment — a RUNNING run
+  aged 11 min was force-failed by `_do_scan()` with
+  `STALE_RUN_TIMEOUT` and `finished_at` set; the layer-2 worker_ready
+  scan had already cleaned earlier stuck runs.
+- Fresh-clone reproduction (task 4): `git clone` → `cp .env.example
+  .env` → `uv sync --extra dev` → `ruff check` clean → `pytest -q`
+  153 passed → `pnpm install --frozen-lockfile` → `pnpm typecheck` →
+  `pnpm build` → `alembic upgrade head` (0004 head). Temp clone
+  removed afterwards.
+- **CI on PR #1: all 4 jobs green** — backend lint+test (153 passed,
+  5 deselected), frontend lint+typecheck+build, infra up+migrate,
+  openapi drift. Two CI-only issues were fixed along the way: the
+  conftest skip regression above, and a ruff-format miss on
+  `tests/conftest.py`.
+- **B1 real-model evaluation (task 6)** — model `step-3.7-flash` via
+  stepfun (`MODEL_BASE_URL=https://api.stepfun.com/v1`; the earlier
+  `.env` value `.../step_plan` returned 404 and was corrected):
+  5 scenarios (normal/benefit_friction/channel_timeout/mixed_failure/
+  data_gap), seed 42, 500 intents — run_success_rate 1.0,
+  stage_localization_exact_rate 0.5, overlap_mean 0.5,
+  root_cause_precision/recall/F1 1.0, evidence_validity 1.0,
+  badcases: STAGE_MISS on benefit_friction. B0 on the same 5-scenario
+  config scores F1 1.0 as well; B1 adds no root-cause regression.
+- `uv run pytest -q` → 153 passed, 5 deselected; ruff check/format
+  clean (92 files).
+
+### Deviations
+- `git commit --amend` + `push --force-with-lease` was used once for
+  the conftest format fix (the branch is a personal feature branch;
+  no force push to master/main).
+- E2E detail-page verification remains LLM-flaky with flash-tier
+  models: DeepSeek flash and step-3.7-flash intermittently emit
+  invalid browser-use actions or markdown-fenced JSON. The list-page
+  check is stable. The deterministic half of the flow test is the
+  regression gate; the LLM half is best-effort UI confirmation.
+- `.env` was switched by the user from DeepSeek to stepfun
+  (`step-3.7-flash`); `MODEL_BASE_URL` corrected from
+  `https://api.stepfun.com/step_plan` (404) to
+  `https://api.stepfun.com/v1` (200, verified by curl).
+
+### Risks
+- `make full-up` image build is blocked by the local network —
+  `auth.docker.io` times out and no `python:3.12-slim`/node base
+  images are cached. Compose config and Dockerfiles are unverified
+  until the network recovers.
+- The remote default branch is `main` (8e4dede) while development
+  targets `master` (bc2804b); PRs must pass `--base master` explicitly
+  or GitHub rejects them ("no history in common").
+- E2E LLM flakiness (above) is inherent to flash-tier models; a
+  stronger model or a deterministic CDP-based verifier would remove
+  it, at the cost of either latency/cost or the LLM-driven workflow.
+
+### Next
+- Retry `make full-up` when Docker Hub is reachable.
+- Optionally merge PR #1 once reviewed.
+- Consider a deterministic (CDP/evaluate-based) E2E verifier for the
+  detail page to replace the flaky LLM assertion.
