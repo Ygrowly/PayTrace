@@ -54,7 +54,16 @@ def _pg_reachable() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(not _pg_reachable(), reason="PostgreSQL not reachable")
+# A module-level ``pytestmark = skipif(...)`` in conftest.py is NOT applied
+# by pytest 8.3.5 (verified experimentally), so skip DB-backed tests via a
+# collection hook instead. Without this, CI without PostgreSQL runs every
+# DB test and fails with UnboundExecutionError instead of skipping.
+def pytest_collection_modifyitems(config, items) -> None:  # noqa: ANN001, ARG001
+    if not _pg_reachable():
+        skip = pytest.mark.skip(reason="PostgreSQL not reachable")
+        for item in items:
+            item.add_marker(skip)
+
 
 # ---------------------------------------------------------------------------
 # Session fixture — explicit cleanup after each test
