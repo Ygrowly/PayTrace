@@ -1,19 +1,19 @@
-"""E2E fixtures: stack reachability gates, LLM, and browser-use Browser.
+"""E2E fixtures: stack reachability gates, deterministic browser, and optional LLM.
 
 The suite is skipped wholesale unless all of these hold:
   - ``browser_use`` importable (installed via ``uv sync --extra e2e``)
   - API reachable at ``$E2E_API_URL`` (default http://localhost:8000)
   - Web reachable at ``$E2E_WEB_URL`` (default http://localhost:3000)
-  - ``MODEL_API_KEY`` set in the environment (Agent is LLM-driven)
-
-Gates run in an autouse fixture so the skip happens at test time, not
+Common gates run in an autouse fixture so the skip happens at test time, not
 collection time — this keeps ``pytest --collect-only`` honest and avoids
-importing browser_use when the gates fail.
+importing browser_use when the browser/stack gates fail. Only tests requesting
+``e2e_llm`` require a model key.
 """
 
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 import httpx
@@ -30,6 +30,9 @@ _CHROME_CANDIDATES = [
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
     r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
     r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
 ]
 
 
@@ -62,14 +65,14 @@ def _check_gates() -> list[str]:
     except ImportError:
         failures.append("browser-use not installed (run: uv sync --extra e2e)")
 
-    if not os.getenv("MODEL_API_KEY"):
-        failures.append("MODEL_API_KEY not set (E2E is LLM-driven)")
-
     if not _reachable(f"{API_URL}/api/v1/health/live"):
         failures.append(f"API not reachable at {API_URL} (run: make run-api)")
 
     if not _reachable(WEB_URL):
         failures.append(f"Web not reachable at {WEB_URL} (run: make run-web)")
+
+    if _find_chrome() is None:
+        failures.append("Chrome/Chromium not found (set E2E_CHROME_PATH)")
 
     return failures
 
@@ -104,6 +107,9 @@ def e2e_llm():
 
     from app.config import get_settings
 
+    if not os.getenv("MODEL_API_KEY"):
+        pytest.skip("MODEL_API_KEY not set; deterministic E2E does not require it")
+
     s = get_settings()
     return ChatOpenAI(
         model=s.model_name,
@@ -131,9 +137,51 @@ async def e2e_browser():
         kwargs["executable_path"] = chrome_path
     browser = Browser(**kwargs)
     try:
+        await browser.start()
         yield browser
     finally:
         try:
             await browser.close()
         except Exception:  # noqa: BLE001, S110 — cleanup must not fail the test
             pass
+
+
+@pytest.fixture
+def diagnosed_incident(api_url: str) -> dict:
+    """Create a deterministic incident and wait for its B0 diagnosis."""
+    with httpx.Client(base_url=api_url, timeout=30) as client:
+        response = client.post(
+            "/api/v1/incidents/simulated",
+            json={
+                "scenario_kind": "normal",
+                "seed": 42,
+                "num_intents": 500,
+                "title": "E2E flow smoke incident",
+            },
+        )
+        response.raise_for_status()
+        incident = response.json()
+
+        response = client.post(
+            f"/api/v1/incidents/{incident['id']}/diagnosis-runs",
+            headers={"Idempotency-Key": f"e2e-flow-{incident['id']}"},
+        )
+        response.raise_for_status()
+        run_ref = response.json()
+
+        run_state: dict = {}
+        for _ in range(45):
+            response = client.get(f"/api/v1/diagnosis-runs/{run_ref['diagnosis_run_id']}")
+            response.raise_for_status()
+            run_state = response.json()
+            if run_state["status"] in {
+                "SUCCEEDED",
+                "NEEDS_DATA",
+                "FAILED",
+                "CANCELLED",
+                "DISPATCH_FAILED",
+            }:
+                break
+            time.sleep(2)
+
+        return {"incident": incident, "run": run_state}

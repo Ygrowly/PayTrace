@@ -15,8 +15,8 @@ that PayTrace is a payment processor.
 | AI safety | Ground Truth isolation, evidence-bound reports, validator, explicit B1 fallback provenance | Implemented baseline |
 | Idempotency and lifecycle | Unique idempotency keys, guarded state transitions, terminal states | Implemented baseline |
 | Async recovery | Celery retry/time limits, startup/periodic stale-run scan, replayable run events | Implemented baseline |
-| Referential integrity | FK-less design; Service now checks Run parents and Report identity | Partial; integration gate pending |
-| Artifact durability | Local and MinIO adapters exist | Incomplete business wiring and metadata |
+| Referential integrity | FK-less design; Service checks Run parents and Report identity; PostgreSQL integration suite passes | Implemented baseline |
+| Artifact durability | Local/MinIO factory wired through diagnosis, evaluation and download; backend/bucket metadata migrated | Implemented single-host baseline; lifecycle/backup pending |
 | Public API security | Host allow-list, CORS and browser security headers | Partial; no caller identity or quotas |
 | Tenant isolation | No tenant principal or tenant-scoped queries | Missing |
 | Abuse/cost control | Tool-call budget exists | Missing API rate limits and model spend quotas |
@@ -24,7 +24,7 @@ that PayTrace is a payment processor.
 | Data governance | Synthetic hashed identifiers; no real payment data required | Missing retention, deletion and access-audit policy |
 | Deployment | Non-root image, health checks, fail-fast production settings, single-host Compose | Demo-ready after runtime verification; not HA |
 | Recovery | Stale task recovery | Missing backup/restore drill, RPO/RTO and disaster runbook |
-| Frontend quality | Lint, typecheck and production build | Missing real component/interaction test suite |
+| Frontend quality | Vitest interaction tests plus deterministic real-Chrome smoke, lint, typecheck and production build | Implemented baseline; broader page coverage pending |
 
 ## Release gates
 
@@ -37,10 +37,15 @@ that PayTrace is a payment processor.
 - No real credentials or customer/payment records are bundled in the demo.
 - A clean-machine Full Compose build and startup has been exercised.
 
+Current local evidence: `make smoke-demo`, the default three-seed/seven-scenario
+matrix, and two deterministic real-Chrome tests pass against the current
+checkout. CI now contains the same no-model smoke path and uploads its matrix,
+but that workflow has not yet run remotely. Full Compose configuration parses
+and now includes automatic migration plus correct Web-to-API routing; image
+build verification remains blocked locally by Docker Hub connectivity.
+
 ### Production telemetry gate
 
-- Persist Artifact storage backend and bucket, migrate existing rows, and route all
-  Diagnosis/Evaluation/upload/download paths through one ArtifactStore factory.
 - Introduce authentication, tenant identity, tenant-scoped repository access,
   authorization tests, rate limits and model-spend quotas.
 - Define retention and erasure for events, reports, traces and object storage;

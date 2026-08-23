@@ -13,7 +13,7 @@ import pytest
 
 from tests.e2e.helpers import extract_json, run_agent
 
-pytestmark = [pytest.mark.e2e]
+pytestmark = [pytest.mark.e2e, pytest.mark.llm_e2e]
 
 
 async def test_homepage_loads(e2e_browser, e2e_llm, web_url) -> None:

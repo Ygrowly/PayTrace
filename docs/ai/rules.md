@@ -130,12 +130,11 @@ MinIO store 可提供预签名下载地址。
 
 前端质量脚本是 `test`、`lint`、`typecheck`、`build`；`pnpm test` 运行 Vitest，
 当前测试覆盖 Eval Lab 的 B0/B1 提交与模型回退展示，但不等价于整站行为覆盖。
-M4 新增 browser-use 驱动的 E2E 测试
-（`backend/tests/e2e/`，`e2e` marker），由 `addopts = "-m 'not e2e'"`
-排除在默认 pytest 之外，CI 不运行。E2E 需要运行中的 stack（API/Worker/
-Web）+ `MODEL_API_KEY` + 系统 Chrome，通过 `make e2e` 手动运行；
-prerequisites 不满足时整组 skip。E2E 由 LLM 驱动，结果非确定性，不能
-作为唯一验收依据。
+M4 的浏览器测试位于 `backend/tests/e2e/`，统一带 `e2e` marker，并由
+`addopts = "-m 'not e2e'"` 排除在默认 pytest 之外。`deterministic_e2e`
+使用 browser-use 的 CDP runtime 驱动真实 Chrome，不创建 Agent、不调用模型，
+是 CI `demo-smoke` 与公开 Demo 的确定性门禁。`llm_e2e` 额外需要
+`MODEL_API_KEY`，结果可能波动，只作为可选体验检查，不能作为唯一验收依据。
 
 证据：`frontend/package.json:scripts`、`backend/tests/e2e/conftest.py`
 （gates 与 `_find_chrome`）、`backend/pyproject.toml` 的 `markers` 与

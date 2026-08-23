@@ -4,7 +4,7 @@
 
 .PHONY: help infra-up infra-down migrate \
         run-api run-worker run-web \
-        gen-openapi generate-scenarios evaluate-rule-based evaluate-matrix smoke-demo e2e \
+        gen-openapi generate-scenarios evaluate-rule-based evaluate-matrix smoke-demo e2e e2e-deterministic \
         backend-lint backend-test frontend-lint frontend-typecheck frontend-test frontend-build
 
 SHELL := /bin/sh
@@ -25,6 +25,7 @@ help:
 	@echo "  make run-web        Start Next.js on :3000"
 	@echo "  make smoke-demo     Run deterministic Incident -> diagnosis API demo"
 	@echo "  make evaluate-matrix Run deterministic multi-seed B0 evaluation"
+	@echo "  make e2e-deterministic Run browser smoke without an LLM"
 	@echo ""
 	@echo "Contracts:"
 	@echo "  make gen-openapi    Export backend/openapi.json + regenerate frontend types"
@@ -106,7 +107,7 @@ smoke-demo:
 	cd backend && uv run python scripts/smoke_demo.py
 
 e2e:
-	@echo "[e2e] Running browser-use E2E tests."
+	@echo "[e2e] Running deterministic and optional LLM browser tests."
 	@echo "[e2e] Prerequisites (must already be running):"
 	@echo "[e2e]   make infra-up && make migrate"
 	@echo "[e2e]   make run-api   (terminal 1)"
@@ -116,3 +117,8 @@ e2e:
 	@echo "[e2e]   uv sync --extra dev --extra e2e (one-time)"
 	@echo ""
 	cd backend && uv run pytest tests/e2e/ -m e2e -o "addopts=" -v
+
+e2e-deterministic:
+	@echo "[e2e] Running deterministic browser tests (no model call)."
+	@echo "[e2e] Requires API, worker, web, Chrome, and the backend e2e extra."
+	cd backend && uv run pytest tests/e2e/test_deterministic.py -m deterministic_e2e -o "addopts=" -v

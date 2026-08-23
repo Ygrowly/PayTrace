@@ -67,8 +67,8 @@ make evaluate-matrix
 ## 工程证据与边界
 
 - 默认测试覆盖领域模型、DuckDB 分析、6 个诊断工具、编排器、状态机、API、评测与 Artifact 校验。
-- CI 执行后端 lint/test、前端 lint/typecheck/build、Migration 和 OpenAPI 契约漂移检查。
-- `backend/tests/e2e/` 提供浏览器驱动的页面与诊断流程验证，但依赖运行中的完整服务和模型，因此不作为唯一回归门禁。
+- CI 执行后端 lint/test、前端 test/lint/typecheck/build、Migration、OpenAPI 契约漂移，以及无需模型的 API/浏览器 Demo smoke。
+- `backend/tests/e2e/` 的 `deterministic_e2e` 子集使用真实 Chrome 且不调用模型；`llm_e2e` 作为可选体验检查，不作为唯一回归门禁。
 - 当前数据源是可复现的 Parquet 场景 Harness，不宣称已经接入真实支付生产流量；公开部署前仍需完成认证、限流、租户隔离和密钥托管。
 - B1 报告记录实际 adapter、模型名、token 用量和回退原因；“请求 B1”不等于“成功调用模型”，公开结果应同时展示成功模型调用数与规则回退数。
 - Full Compose 通过共享 `/data` Volume 连接 API 生成的场景与 Worker 诊断；跨主机生产部署需替换为持久化共享分析数据源。

@@ -8,55 +8,11 @@ NORMAL_PAYMENT_FAILURE).
 
 from __future__ import annotations
 
-import time
-
-import httpx
 import pytest
 
 from tests.e2e.helpers import extract_json, run_agent
 
-pytestmark = [pytest.mark.e2e]
-
-_TERMINAL = {"SUCCEEDED", "NEEDS_DATA", "FAILED", "CANCELLED"}
-
-
-@pytest.fixture
-def diagnosed_incident(api_url: str) -> dict:
-    """Create a simulated incident, trigger diagnosis, wait for terminal state.
-
-    Requires the Celery worker to be running (make run-worker). Polls up to
-    90 seconds for the diagnosis to finish.
-    """
-    with httpx.Client(base_url=api_url, timeout=30) as client:
-        resp = client.post(
-            "/api/v1/incidents/simulated",
-            json={
-                "scenario_kind": "normal",
-                "seed": 42,
-                "num_intents": 500,
-                "title": "E2E flow smoke incident",
-            },
-        )
-        resp.raise_for_status()
-        incident = resp.json()
-
-        resp = client.post(
-            f"/api/v1/incidents/{incident['id']}/diagnosis-runs",
-            headers={"Idempotency-Key": f"e2e-flow-{incident['id']}"},
-        )
-        resp.raise_for_status()
-        run_ref = resp.json()
-
-        run_state: dict = {}
-        for _ in range(45):
-            resp = client.get(f"/api/v1/diagnosis-runs/{run_ref['diagnosis_run_id']}")
-            resp.raise_for_status()
-            run_state = resp.json()
-            if run_state["status"] in _TERMINAL:
-                break
-            time.sleep(2)
-
-        return {"incident": incident, "run": run_state}
+pytestmark = [pytest.mark.e2e, pytest.mark.llm_e2e]
 
 
 async def test_incident_detail_shows_diagnosis_report(

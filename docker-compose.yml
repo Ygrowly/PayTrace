@@ -73,6 +73,25 @@ services:
 
   # --- Full-stack profile (plan § 25.2) -----------------------------------
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-migrate
+    profiles: ["full"]
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    environment:
+      - APP_ENV=${APP_ENV:-dev}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
+      - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
@@ -93,7 +112,7 @@ services:
       - ARTIFACT_ROOT=/data/artifacts
       - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1"]}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
       - MODEL_PROVIDER=${MODEL_PROVIDER:-rule_based}
       - MODEL_BASE_URL=${MODEL_BASE_URL:-}
       - MODEL_API_KEY=${MODEL_API_KEY:-}
@@ -103,6 +122,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -141,7 +162,7 @@ services:
       - ARTIFACT_ROOT=/data/artifacts
       - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1"]}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
       - MODEL_PROVIDER=${MODEL_PROVIDER:-rule_based}
       - MODEL_BASE_URL=${MODEL_BASE_URL:-}
       - MODEL_API_KEY=${MODEL_API_KEY:-}
@@ -151,6 +172,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       minio:
@@ -172,10 +195,12 @@ services:
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
       - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
-      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1"]}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -184,12 +209,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_PAYTRACE_API_BASE: ${NEXT_PUBLIC_PAYTRACE_API_BASE:-http://localhost:8000}
     container_name: paytrace-web
     profiles: ["full"]
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
+      - PAYTRACE_API_BASE=http://api:8000
     depends_on:
       - api
     restart: unless-stopped

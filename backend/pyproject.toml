@@ -30,7 +30,9 @@ dev = [
     "pytest-asyncio>=0.24.0,<0.25.0",
     "httpx>=0.27.0,<0.29.0",
 ]
-# E2E browser tests driven by browser-use (M4). Not installed by default;
+# E2E browser tests use browser-use's CDP browser runtime. Deterministic tests
+# do not call an LLM; optional LLM-driven checks are marked separately.
+# The extra is not installed by default;
 # install with `uv sync --extra dev --extra e2e`. Tests carry the `e2e`
 # marker and are excluded from the default pytest run via addopts.
 e2e = [
@@ -77,9 +79,11 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
-    "e2e: browser-use E2E tests requiring a running stack + LLM (run with: pytest -m e2e tests/e2e/)",
+    "e2e: browser E2E tests requiring a running stack",
+    "deterministic_e2e: browser E2E tests that never call an LLM",
+    "llm_e2e: optional browser-use Agent tests that require a model key",
 ]
 # Default: exclude e2e tests so `pytest -q` (CI + dev) stays deterministic
-# and does not require browser-use, Playwright browsers, or an LLM key.
+# and does not require browser-use, Chrome, or an LLM key.
 # `make e2e` overrides this with an explicit `-m e2e`.
 addopts = "-m 'not e2e'"

@@ -7,4 +7,5 @@
 
 CI 的 PostgreSQL integration job 使用独立的 `paytrace_test` 数据库，先执行
 Alembic Migration，再运行完整 pytest。`tests/e2e/` 另需运行中的 API、Worker、
-Web、浏览器和模型配置，使用 `make e2e` 显式执行。
+Web 与 Chrome；`make e2e-deterministic` 不调用模型并进入 CI。`make e2e` 还会
+选择可选的 `llm_e2e`，该部分需要模型配置且结果可能波动。

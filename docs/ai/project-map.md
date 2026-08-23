@@ -158,7 +158,8 @@ EvaluationRun 并下载 JSON/Markdown 报告。
 | 契约漂移检查 | `git diff --exit-code backend/openapi.json`；`git diff --exit-code frontend/lib/api/schema.ts` | CI `openapi-drift` job |
 | 本地 B0 评测 | `cd backend && uv run python scripts/evaluate_rule_based.py --out data/evaluations` | 无数据库/付费模型调用的脚本路径；`backend/scripts/evaluate_rule_based.py` |
 | 聚合目标 | `make lint`；`make test` | Makefile 聚合 backend/frontend 检查 |
-| E2E | `make e2e` | 显式运行 `backend/tests/e2e/`；需要完整 Stack、浏览器、E2E extra 与模型配置 |
+| 确定性浏览器 E2E | `make e2e-deterministic` | 真实 Chrome/CDP，不调用模型；需要 Stack 与 E2E extra，CI `demo-smoke` 运行 |
+| 可选 LLM E2E | `make e2e` | `llm_e2e` 额外需要模型配置，结果可能波动，不作为唯一门禁 |
 
 `docker compose up`、Migration、评测脚本和前端安装都会触及外部或运行时状态；
 项目地图只记录它们的现有入口，不代表本任务已授权执行。
