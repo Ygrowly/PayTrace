@@ -80,6 +80,12 @@ def score_scenario(
     base.predicted_anomalous_stages = sorted(predicted_stages)
     base.predicted_root_causes = sorted(predicted_causes)
     base.predicted_missing_data = sorted(predicted_gaps)
+    base.adapter_name = report.adapter_name
+    base.model_name = report.model_name
+    base.fallback_used = report.fallback_used
+    base.fallback_reason = report.fallback_reason
+    base.input_tokens = report.input_tokens
+    base.output_tokens = report.output_tokens
 
     # A NEEDS_DATA report is a valid safety outcome for a data-gap scenario;
     # it must not be scored as a root-cause miss before the missing data is
@@ -196,6 +202,14 @@ def aggregate(results: Sequence[ScenarioResult]) -> AggregateMetrics:
     ]
     tool_calls = [r.tool_call_count for r in scored if r.tool_call_count is not None]
     latencies = [r.latency_ms for r in results if r.latency_ms is not None]
+    input_tokens = [r.input_tokens for r in results if r.input_tokens is not None]
+    output_tokens = [r.output_tokens for r in results if r.output_tokens is not None]
+    model_invocation_count = sum(
+        1
+        for r in results
+        if r.adapter_name == "OpenAICompatibleModelAdapter" and not r.fallback_used
+    )
+    fallback_count = sum(1 for r in results if r.fallback_used)
 
     badcase_count = sum(1 for r in results if r.badcases)
 
@@ -214,4 +228,8 @@ def aggregate(results: Sequence[ScenarioResult]) -> AggregateMetrics:
         tool_call_count_mean=_mean([float(t) for t in tool_calls]) if tool_calls else None,
         latency_ms_mean=_mean([float(lat) for lat in latencies]) if latencies else None,
         badcase_count=badcase_count,
+        model_invocation_count=model_invocation_count,
+        fallback_count=fallback_count,
+        total_input_tokens=sum(input_tokens) if input_tokens else None,
+        total_output_tokens=sum(output_tokens) if output_tokens else None,
     )

@@ -90,7 +90,7 @@ def test_rule_based_evaluation_is_reproducible_and_exposes_mixed_failure(tmp_pat
     assert mixed.evidence
     assert mixed.tool_trace
     assert "ground_truth" not in first.json_bytes.decode("utf-8")
-    assert first.markdown_bytes.startswith(b"# PayTrace Rule-based Evaluation Report")
+    assert first.markdown_bytes.startswith(b"# PayTrace Evaluation Report")
 
 
 def test_ground_truth_is_loaded_after_diagnosis(monkeypatch, tmp_path) -> None:
@@ -177,6 +177,11 @@ def test_b1_mode_falls_back_to_rule_based_when_no_api_key(monkeypatch, tmp_path)
     assert result.report.model_mode == "B1"
     normal = next(item for item in result.report.scenario_results if item.scenario_kind == "normal")
     assert normal.diagnosis_status == "SUCCEEDED"
+    assert normal.adapter_name == "RuleBasedModelAdapter"
+    assert normal.fallback_used is True
+    assert normal.fallback_reason == "MODEL_NOT_CONFIGURED"
+    assert result.report.metrics.model_invocation_count == 0
+    assert result.report.metrics.fallback_count == 1
 
 
 def test_b1_mode_rejected_invalid_mode(tmp_path) -> None:
@@ -208,3 +213,5 @@ def test_b0_mode_still_works(tmp_path) -> None:
     assert result.report.metrics.run_success_rate == 1.0
     assert result.report.model_mode == "B0"
     assert result.report.metrics.scenario_count == 1
+    assert result.report.metrics.model_invocation_count == 0
+    assert result.report.metrics.fallback_count == 0

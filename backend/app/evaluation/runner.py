@@ -134,6 +134,12 @@ def _score_one(
             "report_summary": report.summary,
             "unexplained_lost_intents": report.unexplained_lost_intents,
             "recommended_actions": report.recommended_actions,
+            "adapter_name": report.adapter_name,
+            "model_name": report.model_name,
+            "fallback_used": report.fallback_used,
+            "fallback_reason": report.fallback_reason,
+            "input_tokens": report.input_tokens,
+            "output_tokens": report.output_tokens,
             "evidence": evidence,
             "tool_trace": trace,
             "tool_call_count": len(execution.tool_results),
@@ -145,7 +151,7 @@ def render_markdown(report: EvaluationReport) -> bytes:
     """Render the evaluation report as a small, portable Markdown artifact."""
     m = report.metrics
     lines = [
-        "# PayTrace Rule-based Evaluation Report",
+        "# PayTrace Evaluation Report",
         "",
         f"- Evaluation run: `{report.evaluation_run_id}`",
         f"- Model mode: `{report.model_mode}`",
@@ -165,17 +171,28 @@ def render_markdown(report: EvaluationReport) -> bytes:
         f"| Evidence validity mean | {m.evidence_validity_rate_mean:.2%} |",
         f"| Unsupported-claim rate mean | {m.unsupported_claim_rate_mean:.2%} |",
         f"| Badcase scenarios | {m.badcase_count} |",
+        f"| Successful model invocations | {m.model_invocation_count} |",
+        f"| Rule-based fallbacks | {m.fallback_count} |",
+        f"| Input tokens | {m.total_input_tokens if m.total_input_tokens is not None else '—'} |",
+        "| Output tokens | "
+        f"{m.total_output_tokens if m.total_output_tokens is not None else '—'} |",
         "",
         "## Scenario results",
         "",
-        "| Scenario | Status | Predicted root causes | Expected root causes | Badcases |",
-        "| --- | --- | --- | --- | --- |",
+        "| Scenario | Status | Adapter | Fallback | Predicted root causes "
+        "| Expected root causes | Badcases |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for result in report.scenario_results:
         lines.append(
-            "| {scenario} | {status} | {predicted} | {expected} | {badcases} |".format(
+            (
+                "| {scenario} | {status} | {adapter} | {fallback} | {predicted} "
+                "| {expected} | {badcases} |"
+            ).format(
                 scenario=result.scenario_kind,
                 status=result.diagnosis_status,
+                adapter=result.adapter_name or "—",
+                fallback=result.fallback_reason or "—",
                 predicted=", ".join(result.predicted_root_causes) or "—",
                 expected=", ".join(result.expected_root_causes) or "—",
                 badcases=", ".join(result.badcases) or "—",

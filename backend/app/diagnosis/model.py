@@ -1,8 +1,7 @@
-"""ModelAdapter protocol + RuleBasedModelAdapter (plan § 15).
+"""Shared ModelAdapter protocol and immutable diagnosis context (plan § 15).
 
-The ModelAdapter protocol defines the contract. M2 implements only the
-RuleBasedModelAdapter (deterministic, no API key required). The
-OpenAI-compatible adapter is deferred to a later milestone.
+Concrete rule-based and OpenAI-compatible adapters live in ``adapter.py``.
+Both consume this context and return the same validated report contract.
 """
 
 from typing import Protocol

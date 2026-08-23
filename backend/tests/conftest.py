@@ -1,9 +1,8 @@
 """Test fixtures for DB-backed integration tests.
 
-Uses the real PostgreSQL database.  Each test cleans up after itself
-by deleting all rows from the key tables.  The API endpoints commit
-their own transactions, so we use explicit cleanup instead of
-SAVEPOINT-based rollback.
+Database-backed tests are allowed to clean rows only in a database whose name
+ends in ``_test``. Unit tests continue to run when that isolated database is
+not configured or reachable.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
@@ -36,20 +36,32 @@ from app.main import app as _app
 # ---------------------------------------------------------------------------
 
 _ENGINE = None
+_DB_SKIP_REASON = "isolated PostgreSQL test database is not configured"
 
 
 def _pg_reachable() -> bool:
-    global _ENGINE
+    global _DB_SKIP_REASON, _ENGINE
+    database_url = get_settings().database_url
+    database_name = make_url(database_url).database or ""
+    if not database_name.endswith("_test"):
+        _DB_SKIP_REASON = (
+            f"refusing destructive integration tests on database {database_name!r}; "
+            "DATABASE_URL must name a database ending in '_test'"
+        )
+        _ENGINE = None
+        return False
+
     try:
         _ENGINE = create_engine(
-            get_settings().database_url,
+            database_url,
             pool_pre_ping=True,
             connect_args={"connect_timeout": 2},
         )
         with _ENGINE.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _DB_SKIP_REASON = f"isolated PostgreSQL test database is unreachable: {type(exc).__name__}"
         _ENGINE = None
         return False
 
@@ -60,9 +72,12 @@ def _pg_reachable() -> bool:
 # DB test and fails with UnboundExecutionError instead of skipping.
 def pytest_collection_modifyitems(config, items) -> None:  # noqa: ANN001, ARG001
     if not _pg_reachable():
-        skip = pytest.mark.skip(reason="PostgreSQL not reachable")
+        skip = pytest.mark.skip(reason=_DB_SKIP_REASON)
         for item in items:
-            item.add_marker(skip)
+            # ``fixturenames`` includes transitive dependencies, so API tests
+            # using ``client`` also contain the underlying ``db_session``.
+            if "db_session" in item.fixturenames:
+                item.add_marker(skip)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +105,8 @@ def db_session() -> Generator[Session, None, None]:
     After the test ends, all rows in the key tables are deleted
     regardless of whether the test passed or the API committed.
     """
+    if _ENGINE is None:
+        pytest.fail("db_session requested without an isolated test database")
     maker = sessionmaker(_ENGINE, expire_on_commit=False, class_=Session)
     session = maker()
 

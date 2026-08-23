@@ -12,14 +12,18 @@ from app.config import get_settings
 from app.db.models import ArtifactRecord
 from app.db.session import get_db
 from app.evaluation import service
-from app.evaluation.runner import resolve_runtime_path
 from app.evaluation.schemas import (
     EvaluationRunCreate,
     EvaluationRunListResponse,
     EvaluationRunResponse,
     EvaluationRunTriggerResponse,
 )
-from app.harness.artifact_store import ArtifactRef, LocalArtifactStore
+from app.harness.artifact_store import (
+    ArtifactChecksumError,
+    ArtifactRef,
+    ArtifactStoreError,
+    create_artifact_store,
+)
 from app.harness.scenarios.ground_truth import SCENARIO_KINDS
 from app.ontology.registry import ONTOLOGY_VERSION
 from app.tasks.evaluation import run_evaluation_task
@@ -157,9 +161,10 @@ def download_evaluation_report(
         )
 
     settings = get_settings()
-    store = LocalArtifactStore(resolve_runtime_path(settings.artifact_root))
+    store = create_artifact_store(settings, backend=artifact.storage_backend)
     ref = ArtifactRef(
-        bucket="local",
+        backend=artifact.storage_backend,
+        bucket=artifact.storage_bucket,
         key=artifact.storage_key,
         checksum_sha256=artifact.checksum,
         size_bytes=artifact.size_bytes,
@@ -167,7 +172,7 @@ def download_evaluation_report(
     )
     try:
         content = store.get_bytes(ref)
-    except FileNotFoundError as exc:
+    except (ArtifactChecksumError, ArtifactStoreError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Report artifact bytes not found"
         ) from exc

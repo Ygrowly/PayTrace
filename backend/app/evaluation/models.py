@@ -54,6 +54,12 @@ class ScenarioResult(BaseModel):
     report_summary: str | None = None
     unexplained_lost_intents: int | None = None
     recommended_actions: list[str] = Field(default_factory=list)
+    adapter_name: str | None = None
+    model_name: str | None = None
+    fallback_used: bool = False
+    fallback_reason: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     tool_trace: list[dict[str, Any]] = Field(default_factory=list)
     badcases: list[BadcaseCategory] = Field(default_factory=list)
@@ -76,6 +82,8 @@ class AggregateMetrics(BaseModel):
     tool_call_count_mean: float | None = None
     latency_ms_mean: float | None = None
     badcase_count: int
+    model_invocation_count: int = 0
+    fallback_count: int = 0
     # Token usage / estimated cost — nullable per § 20.2 (B0 rule-based = none).
     total_input_tokens: int | None = None
     total_output_tokens: int | None = None

@@ -1,14 +1,14 @@
 """Artifact ORM (plan § 10.12).
 
-Artifact metadata stored in-object-store.  Diagnosis and evaluation reports
-use the same FK-less metadata record; local development exposes content and
-download-url endpoints while the full remote lifecycle remains deferred.
+Artifact metadata points to object-store bytes. Diagnosis and evaluation
+reports use the same FK-less metadata record and persist the concrete backend,
+bucket, key, checksum, and content metadata required for later retrieval.
 """
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Index, String, func
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +22,8 @@ class ArtifactRecord(Base):
     diagnosis_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     evaluation_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     artifact_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_backend: Mapped[str] = mapped_column(String(16), nullable=False)
+    storage_bucket: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     content_type: Mapped[str] = mapped_column(String(128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -31,6 +33,10 @@ class ArtifactRecord(Base):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "storage_backend IN ('local', 'minio')",
+            name="ck_artifacts_storage_backend",
+        ),
         Index("ix_artifacts_diagnosis_run_id", "diagnosis_run_id"),
         Index("ix_artifacts_evaluation_run_id", "evaluation_run_id"),
     )

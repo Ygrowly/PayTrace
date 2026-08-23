@@ -53,7 +53,10 @@ class DiagnosisReport(BaseModel):
     ontology_version: str
     prompt_version: str | None = None
     validator_version: str
-    model_name: str | None = None
+    adapter_name: str = "RuleBasedModelAdapter"
+    model_name: str | None = "rule_based"
+    fallback_used: bool = False
+    fallback_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     estimated_cost: float | None = None

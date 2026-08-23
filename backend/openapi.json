@@ -1151,6 +1151,16 @@
             "type": "integer",
             "title": "Badcase Count"
           },
+          "model_invocation_count": {
+            "type": "integer",
+            "title": "Model Invocation Count",
+            "default": 0
+          },
+          "fallback_count": {
+            "type": "integer",
+            "title": "Fallback Count",
+            "default": 0
+          },
           "total_input_tokens": {
             "anyOf": [
               {
@@ -3148,6 +3158,66 @@
             },
             "type": "array",
             "title": "Recommended Actions"
+          },
+          "adapter_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter Name"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          },
+          "fallback_used": {
+            "type": "boolean",
+            "title": "Fallback Used",
+            "default": false
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
           },
           "evidence": {
             "items": {

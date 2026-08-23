@@ -97,6 +97,20 @@ class TestIncidentService:
 
 
 class TestDiagnosisRunService:
+    def test_create_run_rejects_missing_incident(self, db_session: Session) -> None:
+        missing_id = uuid.uuid4()
+
+        with pytest.raises(service.ReferentialIntegrityError, match="Incident"):
+            service.create_or_get_run(db_session, missing_id, "ik-orphan")
+
+    def test_write_event_rejects_missing_run(self, db_session: Session) -> None:
+        with pytest.raises(service.ReferentialIntegrityError, match="DiagnosisRun"):
+            service.write_event(
+                db_session,
+                diagnosis_run_id=uuid.uuid4(),
+                event_type="orphan_event",
+            )
+
     def test_create_or_get_run_idempotent(self, db_session: Session) -> None:
         inc = _make_incident(db_session)
         key = "ik-001"
@@ -249,6 +263,28 @@ class TestDiagnosisRunService:
         assert len(findings) == 1
         assert findings[0].label == "GatewayTimeout"
         assert findings[0].confidence == "HIGH"
+
+    def test_persist_report_rejects_parent_mismatch(self, db_session: Session) -> None:
+        incident = _make_incident(db_session)
+        other_incident = _make_incident(db_session, title="other")
+        run, _ = service.create_or_get_run(db_session, incident.id, "ik-report-parent")
+        report = DiagnosisReport(
+            incident_id=str(other_incident.id),
+            diagnosis_run_id=str(run.id),
+            status="SUCCEEDED",
+            summary="Mismatched parent",
+            root_causes=[],
+            ontology_version="paytrace.ontology.v1",
+            validator_version="paytrace.validator.v1",
+        )
+
+        with pytest.raises(service.ReferentialIntegrityError, match="Report incident"):
+            service.persist_report(
+                db_session,
+                run_id=run.id,
+                report=report,
+                validator_version=report.validator_version,
+            )
 
     def test_get_report_not_found(self, db_session: Session) -> None:
         rec, findings = service.get_report(db_session, uuid.uuid4())

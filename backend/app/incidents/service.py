@@ -30,6 +30,21 @@ from app.diagnosis.report import DiagnosisReport
 
 logger = logging.getLogger(__name__)
 
+
+class ReferentialIntegrityError(ValueError):
+    """Raised when an FK-less control-plane write references a missing parent."""
+
+
+def _require_run(db: Session, run_id: uuid.UUID, *, for_update: bool = False) -> DiagnosisRun:
+    query = db.query(DiagnosisRun).filter(DiagnosisRun.id == run_id)
+    if for_update:
+        query = query.with_for_update()
+    run = query.first()
+    if run is None:
+        raise ReferentialIntegrityError(f"DiagnosisRun {run_id} does not exist")
+    return run
+
+
 # ---------------------------------------------------------------------------
 # State machine
 # ---------------------------------------------------------------------------
@@ -133,6 +148,10 @@ def create_or_get_run(
     Per plan § 17.1 item 2: the INSERT ... ON CONFLICT DO NOTHING transaction
     guarantees exactly one run per (incident, key) pair.
     """
+    incident_exists = db.query(Incident.id).filter(Incident.id == incident_id).first()
+    if incident_exists is None:
+        raise ReferentialIntegrityError(f"Incident {incident_id} does not exist")
+
     now = datetime.now(UTC)
     run_id = uuid.uuid4()
 
@@ -217,10 +236,12 @@ def write_event(
 ) -> DiagnosisRunEvent:
     """Append a progress event to diagnosis_run_events.
 
-    The ``sequence`` is computed as ``MAX(sequence) + 1`` within the same
-    diagnosis_run_id, avoiding gaps under concurrent writers (though M2b
-    uses solo Celery workers, so contention is not expected).
+    The parent DiagnosisRun row is locked before ``MAX(sequence) + 1`` is
+    computed. This both enforces the FK-less reference and serializes the
+    first-event case, where locking an existing event row cannot protect an
+    empty sequence.
     """
+    _require_run(db, diagnosis_run_id, for_update=True)
     max_seq = (
         db.query(DiagnosisRunEvent.sequence)
         .filter(DiagnosisRunEvent.diagnosis_run_id == diagnosis_run_id)
@@ -256,6 +277,16 @@ def persist_report(
     scalar columns for queryability.  Root causes are inserted into
     ``root_cause_findings``.
     """
+    run = _require_run(db, run_id)
+    if report.diagnosis_run_id != str(run_id):
+        raise ReferentialIntegrityError(
+            f"Report run {report.diagnosis_run_id} does not match {run_id}"
+        )
+    if report.incident_id != str(run.incident_id):
+        raise ReferentialIntegrityError(
+            f"Report incident {report.incident_id} does not match {run.incident_id}"
+        )
+
     report_orm = DiagnosisReportRecord(
         diagnosis_run_id=run_id,
         status=report.status,
@@ -318,6 +349,7 @@ def persist_execution_trace(
     trace needs enough information for the UI to locate a tool call while
     avoiding raw paths and large result payloads in PostgreSQL.
     """
+    _require_run(db, run_id)
     evidence_by_call: dict[str, list] = {}
     for evidence in execution.ledger.all():
         evidence_by_call.setdefault(evidence.tool_call_id, []).append(evidence)
@@ -335,6 +367,8 @@ def persist_execution_trace(
                 id=uuid.uuid4(),
                 diagnosis_run_id=run_id,
                 artifact_type="tool_result",
+                storage_backend=result.artifact_ref.backend,
+                storage_bucket=result.artifact_ref.bucket,
                 storage_key=result.artifact_ref.key,
                 content_type=result.artifact_ref.content_type,
                 size_bytes=result.artifact_ref.size_bytes,

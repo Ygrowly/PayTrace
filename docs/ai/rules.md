@@ -117,18 +117,20 @@ B1 才实际调用模型。也不能把无 key 下的 B1 运行结果描述为"�
 ## 9. Artifact 通过受限 Key 和校验和访问
 
 ArtifactStore 对 Key 做白名单清洗并拒绝路径穿越；写入记录 SHA-256，读取时
-重新校验。当前诊断 API 和评测 API 使用 `LocalArtifactStore` 的本地内容/下载
-回退；MinIO 实现提供预签名下载地址。
+重新校验。Artifact 记录持久化 backend/bucket；诊断与评测任务通过配置工厂写入，
+诊断 API 和评测 API 按记录中的 backend 读取。Local store 使用受控内容端点，
+MinIO store 可提供预签名下载地址。
 
 证据：`backend/app/harness/artifact_store.py:_sanitize_key`、`_sha256`、
 `LocalArtifactStore`、`MinioArtifactStore`、
 `backend/tests/test_artifact_store.py`、`backend/app/api/v1/diagnosis.py`、
 `backend/app/api/v1/evaluations.py`。
 
-## 10. 前端 `pnpm test` 不是单元测试门禁；E2E 用 browser-use 且不进 CI
+## 10. 前端单元测试与 browser-use E2E 是不同层级的门禁
 
-前端质量脚本是 `lint`、`typecheck`、`build`；`pnpm test` 仍是 placeholder，
-不能证明前端行为被单元测试覆盖。M4 新增 browser-use 驱动的 E2E 测试
+前端质量脚本是 `test`、`lint`、`typecheck`、`build`；`pnpm test` 运行 Vitest，
+当前测试覆盖 Eval Lab 的 B0/B1 提交与模型回退展示，但不等价于整站行为覆盖。
+M4 新增 browser-use 驱动的 E2E 测试
 （`backend/tests/e2e/`，`e2e` marker），由 `addopts = "-m 'not e2e'"`
 排除在默认 pytest 之外，CI 不运行。E2E 需要运行中的 stack（API/Worker/
 Web）+ `MODEL_API_KEY` + 系统 Chrome，通过 `make e2e` 手动运行；
@@ -138,3 +140,15 @@ prerequisites 不满足时整组 skip。E2E 由 LLM 驱动，结果非确定性�
 证据：`frontend/package.json:scripts`、`backend/tests/e2e/conftest.py`
 （gates 与 `_find_chrome`）、`backend/pyproject.toml` 的 `markers` 与
 `addopts`、`Makefile:e2e`、`.github/workflows/ci.yml:frontend`。
+
+## 11. 数据库集成测试只允许使用 `_test` 数据库
+
+`backend/tests/conftest.py` 会在测试结束时显式清理控制面表，因此只有当
+`DATABASE_URL` 的数据库名称以 `_test` 结尾且连接可达时，才运行依赖
+`db_session` 的数据库/API 测试。数据库不可用或名称不安全时，只跳过这些
+测试，其他单元测试必须继续执行；禁止用“全部 skip”制造 CI 绿灯。
+
+CI integration job 使用 `paytrace_test`，执行 Migration 后运行完整 pytest。
+
+证据：`backend/tests/conftest.py:_pg_reachable`、
+`pytest_collection_modifyitems`、`.github/workflows/ci.yml:integration`。

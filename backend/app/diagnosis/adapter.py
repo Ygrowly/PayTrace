@@ -376,6 +376,7 @@ class OpenAICompatibleModelAdapter:
         self._prompt_version = prompt_version
         self._fallback = RuleBasedModelAdapter(validator_version=validator_version)
         self.last_usage: dict[str, int] | None = None
+        self.last_fallback_reason: str | None = None
 
     @property
     def model_name(self) -> str:
@@ -426,13 +427,25 @@ class OpenAICompatibleModelAdapter:
             ontology_version=ctx.ontology_version,
             prompt_version=self._prompt_version,
             validator_version=self._validator_version,
+            adapter_name="OpenAICompatibleModelAdapter",
             model_name=self.model_name,
         )
 
+    def _generate_fallback(self, ctx: DiagnosisContext, reason: str) -> DiagnosisReport:
+        self.last_usage = None
+        self.last_fallback_reason = reason
+        return self._fallback.generate(ctx).model_copy(
+            update={
+                "fallback_used": True,
+                "fallback_reason": reason,
+            }
+        )
+
     def generate(self, ctx: DiagnosisContext) -> DiagnosisReport:
+        self.last_fallback_reason = None
         if not self._api_key or not self._base_url:
             logger.warning("LLM adapter: no api_key or base_url, falling back to rule-based")
-            return self._fallback.generate(ctx)
+            return self._generate_fallback(ctx, "MODEL_NOT_CONFIGURED")
 
         try:
             from openai import OpenAI
@@ -479,5 +492,4 @@ class OpenAICompatibleModelAdapter:
                 type(exc).__name__,
                 str(exc)[:200],
             )
-            self.last_usage = None
-            return self._fallback.generate(ctx)
+            return self._generate_fallback(ctx, "MODEL_CALL_FAILED")

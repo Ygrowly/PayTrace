@@ -16,6 +16,7 @@ from typing import Any
 from app.analytics.duckdb_source import DuckDBAnalyticsSource
 from app.db.session import session_maker
 from app.diagnosis.orchestrator import DiagnosisOrchestrator, OrchestratorFailure
+from app.harness.artifact_store import create_artifact_store
 from app.incidents import service
 from app.tasks.celery_app import celery_app
 
@@ -149,9 +150,10 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
     # --- Execute the orchestrator (outside DB session for I/O) --------------
     try:
         source = DuckDBAnalyticsSource()
+        artifact_store = create_artifact_store()
         orch = DiagnosisOrchestrator(
             source=source,
-            artifacts=None,  # M2b: no artifact store yet
+            artifacts=artifact_store,
             dimensions=("payment_channel", "payment_method"),
             evidence_code_prefix=run_id.hex[:8],
         )
@@ -204,6 +206,15 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
             run,
             final_status,
             ontology_version=report.ontology_version,
+            model_provider=(
+                "openai_compatible"
+                if report.adapter_name == "OpenAICompatibleModelAdapter"
+                else "rule_based"
+            ),
+            model_name=report.model_name,
+            input_tokens=report.input_tokens,
+            output_tokens=report.output_tokens,
+            estimated_cost=report.estimated_cost,
             total_duration_ms=int((datetime.now(UTC) - run.started_at).total_seconds() * 1000)
             if run.started_at
             else None,

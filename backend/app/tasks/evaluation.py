@@ -12,7 +12,7 @@ from app.db.models import ArtifactRecord
 from app.db.session import session_maker
 from app.evaluation import service
 from app.evaluation.runner import resolve_runtime_path, run_evaluation
-from app.harness.artifact_store import LocalArtifactStore
+from app.harness.artifact_store import create_artifact_store
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,8 @@ def _artifact_record(*, run_id: uuid.UUID, artifact_type: str, ref: Any) -> Arti
     return ArtifactRecord(
         evaluation_run_id=run_id,
         artifact_type=artifact_type,
+        storage_backend=ref.backend,
+        storage_bucket=ref.bucket,
         storage_key=ref.key,
         content_type=ref.content_type,
         size_bytes=ref.size_bytes,
@@ -66,7 +68,7 @@ def run_evaluation_task(self: Any, evaluation_run_id: str) -> dict[str, str]:
             return {"run_id": str(run_id), "status": run.status}
         service.update_status(db, run, "RUNNING")
 
-    artifact_store = LocalArtifactStore(resolve_runtime_path(settings.artifact_root))
+    artifact_store = create_artifact_store(settings)
     try:
         execution = run_evaluation(
             evaluation_run_id=str(run_id),

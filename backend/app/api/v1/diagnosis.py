@@ -16,8 +16,12 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import ArtifactRecord, DiagnosisRunEvent, EvidenceRecord
 from app.db.session import get_db
-from app.evaluation.runner import resolve_runtime_path
-from app.harness.artifact_store import ArtifactRef, LocalArtifactStore
+from app.harness.artifact_store import (
+    ArtifactChecksumError,
+    ArtifactRef,
+    ArtifactStoreError,
+    create_artifact_store,
+)
 from app.incidents import service
 from app.incidents.schemas import (
     ArtifactDownloadResponse,
@@ -31,6 +35,17 @@ from app.incidents.schemas import (
 router = APIRouter(prefix="/diagnosis-runs", tags=["diagnosis"])
 evidence_router = APIRouter(prefix="/evidence", tags=["evidence"])
 artifact_router = APIRouter(prefix="/artifacts", tags=["artifacts"])
+
+
+def _artifact_ref(artifact: ArtifactRecord) -> ArtifactRef:
+    return ArtifactRef(
+        backend=artifact.storage_backend,
+        bucket=artifact.storage_bucket,
+        key=artifact.storage_key,
+        checksum_sha256=artifact.checksum,
+        size_bytes=artifact.size_bytes,
+        content_type=artifact.content_type,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -217,19 +232,13 @@ def get_artifact_download_url(
     if artifact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
     settings = get_settings()
-    store = LocalArtifactStore(resolve_runtime_path(settings.artifact_root))
-    ref = ArtifactRef(
-        bucket="local",
-        key=artifact.storage_key,
-        checksum_sha256=artifact.checksum,
-        size_bytes=artifact.size_bytes,
-        content_type=artifact.content_type,
-    )
+    ref = _artifact_ref(artifact)
+    store = create_artifact_store(settings, backend=ref.backend)
     try:
         # A local store uses a file URI; the content endpoint below provides a
         # browser-safe fallback for the local development UI.
         url = store.create_download_url(ref, expires_seconds=300)
-    except (FileNotFoundError, ValueError) as exc:
+    except (ArtifactStoreError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Artifact bytes not found"
         ) from exc
@@ -247,17 +256,11 @@ def get_artifact_content(artifact_id: uuid.UUID, db: Session = Depends(get_db)) 
     if artifact is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
     settings = get_settings()
-    store = LocalArtifactStore(resolve_runtime_path(settings.artifact_root))
-    ref = ArtifactRef(
-        bucket="local",
-        key=artifact.storage_key,
-        checksum_sha256=artifact.checksum,
-        size_bytes=artifact.size_bytes,
-        content_type=artifact.content_type,
-    )
+    ref = _artifact_ref(artifact)
+    store = create_artifact_store(settings, backend=ref.backend)
     try:
         content = store.get_bytes(ref)
-    except (FileNotFoundError, ValueError) as exc:
+    except (ArtifactChecksumError, ArtifactStoreError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Artifact bytes not found"
         ) from exc

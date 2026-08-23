@@ -39,6 +39,12 @@ Browser (Next.js :3000)
 | Execution | Celery Worker | Diagnosis workflow, tool calls, model calls, report validation, evaluation scoring |
 | Presentation | Next.js | Incident list/detail, diagnosis workbench, Eval Lab, SSE progress, ECharts |
 
+In the full Docker Compose topology, API and Worker mount the same `/data`
+runtime volume. The API materialises simulated Parquet datasets under
+`/data/scenarios`; the Worker reads those exact paths during diagnosis.
+Production deployments should replace this single-host volume with a durable,
+shared analytics/object-storage source before running multiple hosts.
+
 ## Key boundaries
 
 - **No DB foreign keys** (ADR 0003): Referential integrity is enforced by service-layer code and integration tests.

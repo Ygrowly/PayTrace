@@ -11,7 +11,7 @@
 | `backend/app/main.py` | FastAPI 应用工厂、Trace ID 中间件、CORS、挂载 v1 Router | `create_app()`、`app.include_router(api_v1_router)` |
 | `backend/app/api/v1/` | HTTP 路由聚合：health、ontology、incidents、diagnosis、evaluations | `backend/app/api/v1/__init__.py` 的 `APIRouter(prefix="/api/v1")` 与 `include_router` |
 | `backend/app/db/` | SQLAlchemy Base、同步 Engine/Session、控制面 ORM | `db/base.py`、`db/session.py`、`db/models/__init__.py` |
-| `backend/migrations/versions/` | Alembic 控制面 Schema，当前链为 `0001` → `0002` → `0003` | 三个 migration 文件的 `revision`/`down_revision` |
+| `backend/migrations/versions/` | Alembic 控制面 Schema，当前链为 `0001` → `0002` → `0003` → `0004` → `0005` | 五个 migration 文件的 `revision`/`down_revision` |
 | `backend/app/incidents/` | Incident/DiagnosisRun Service、状态迁移、幂等创建、报告/Trace 持久化 | `incidents/service.py`、`incidents/schemas.py` |
 | `backend/app/diagnosis/` | 固定诊断编排、Context、ModelAdapter、Report、Validator | `diagnosis/orchestrator.py`、`context.py`、`adapter.py`、`validator.py` |
 | `backend/app/domain/` | Canonical Payment Event、漏斗阶段、事件类型/状态/周期 | `domain/events.py:FunnelStage`、`CanonicalPaymentEvent`、`FUNNEL_STAGE_ORDER` |
@@ -19,7 +19,7 @@
 | `backend/app/analytics/` | `PaymentAnalyticsSource` 协议与 Parquet/DuckDB 实现 | `analytics/base.py`、`analytics/duckdb_source.py` |
 | `backend/app/harness/` | 确定性场景、Parquet DatasetRef、隔离 Ground Truth、ArtifactStore | `harness/scenarios/`、`harness/artifact_store.py` |
 | `backend/app/tools/` | 六个只读诊断工具（含 `trace_cancel_and_reorder`、`get_config_changes`）、工具注册表、调用预算、EvidenceLedger | `tools/base.py`、`tools/diagnostic.py` |
-| `backend/app/evaluation/` | B0 评测 Runner、指标、报告模型、持久化 Service、API Schema | `evaluation/runner.py`、`metrics.py`、`models.py`、`service.py`、`schemas.py` |
+| `backend/app/evaluation/` | B0/B1 评测 Runner、指标、报告模型、持久化 Service、API Schema | `evaluation/runner.py`、`metrics.py`、`models.py`、`service.py`、`schemas.py` |
 | `backend/app/tasks/` | Celery 应用、heartbeat、诊断任务、评测任务、stale 扫描任务；Beat 每 5 分钟调度 stale-run 恢复 | `tasks/celery_app.py` 的 `include` 列表与四个任务文件、`tasks/stale_scan.py:scan_stale_runs` |
 | `backend/tests/` | 单元、API、PostgreSQL 条件集成、MinIO 条件集成测试 | `pyproject.toml` 的 `testpaths = ["tests"]` 与测试文件集合 |
 | `frontend/app/` | Next.js App Router：首页、Incident 列表/详情、Eval Lab | `app/page.tsx`、`app/incidents/`、`app/eval/page.tsx` |
@@ -29,10 +29,8 @@
 | `data/scenarios/` | 运行时生成的场景数据目录；仓库只保留 `.gitkeep` | `app/config.py` 的 `scenario_root`、`.gitignore`、`data/scenarios/.gitkeep` |
 | `backend/openapi.json` | 当前后端 OpenAPI 导出文件 | `backend/scripts/export_openapi.py` 写入 `app.openapi()` |
 
-扫描时发现若干旧文档仍标注“占位”（例如 `docs/architecture.md`、
-`docs/domain-model.md`、`backend/app/README.md` 和
-`backend/migrations/README.md`），但对应实现、Migration 和测试已经存在。
-因此这里只把它们作为背景，不以其占位描述否定当前代码。
+实现状态以代码、Migration、测试和当前命令输出为准；README 与开发日志用于
+说明入口和历史，不替代可执行证据。
 
 ## 核心模块与边界
 
@@ -46,8 +44,11 @@
 - `0002`：`artifacts`、`tool_executions`、`evidence`、`diagnosis_reports`、
   `root_cause_findings`、`prompt_versions`；
 - `0003`：`evaluation_runs`，并为评测 Artifact 增加索引。
+- `0004`：放宽 `root_cause_findings.category` 的可空约束，使 Schema 与 ORM 一致。
+- `0005`：为 Artifact 增加 `storage_backend`/`storage_bucket`，历史记录回填为
+  `local/local`，并约束 backend 只能是 `local` 或 `minio`。
 
-三个 Migration 和 `backend/app/db/base.py` 都明确不声明 DB 层外键；跨表
+五个 Migration 和 `backend/app/db/base.py` 都明确不声明 DB 层外键；跨表
 完整性由 Service/任务代码负责，例如 `incidents/service.py` 的
 `create_or_get_run()`、`update_run_status()` 和 `persist_report()`。
 
@@ -70,8 +71,8 @@ Breakdown、Benefit、Payment Event、DatasetValidation 结果模型。
 
 工具只接收 `PaymentAnalyticsSource`，系统生成 `EvidenceLedger` 编号；在调用方
 传入 `ArtifactStore` 时，完整工具结果可外置存储，控制面只持久化元数据和引用。
-当前诊断 Celery 任务显式传入 `artifacts=None`，评测任务使用本地
-`LocalArtifactStore`。对应证据是 `tools/base.py`、`tools/diagnostic.py`、
+诊断与评测 Celery 任务都通过配置工厂取得 `ArtifactStore`。对应证据是
+`tools/base.py`、`tools/diagnostic.py`、
 `diagnosis/context.py`、`tasks/diagnosis.py`、`tasks/evaluation.py` 和
 `harness/artifact_store.py`。
 
@@ -80,7 +81,14 @@ Breakdown、Benefit、Payment Event、DatasetValidation 结果模型。
 `backend/app/evaluation/runner.py` 使用同一个 `DiagnosisOrchestrator` 执行
 场景，然后在 `_score_one()` 中诊断完成后加载 Ground Truth，并调用
 `evaluation/metrics.py` 产生场景结果、badcase 和聚合指标。当前 API Schema
-`evaluation/schemas.py` 的 `model_mode` 仅允许 `B0`；Runner 也拒绝非 `B0`。
+`evaluation/schemas.py` 的 `model_mode` 允许 `B0` 与 `B1`。B0 使用规则适配器；
+B1 使用 OpenAI-compatible 适配器，并在模型配置缺失或调用失败时降级到 B0。
+场景结果保留 adapter、模型、token 与回退原因，聚合指标分别统计成功模型调用与
+规则回退，避免把“请求 B1”误报成外部模型实际执行。
+
+`harness/artifact_store.py` 提供 local/MinIO 实现与配置工厂；Diagnosis、Evaluation
+任务按 `ARTIFACT_STORE_BACKEND` 写入，Artifact 记录持久化 backend/bucket，下载 API
+按每条记录的 backend 读取，因此历史 local Artifact 不会被当前全局配置误读。
 
 前端通过 `frontend/lib/api/client.ts` 访问 `/api/v1`，类型来自
 `frontend/lib/api/schema.ts`。`/incidents/[id]` 轮询 DiagnosisRun、读取报告与
@@ -138,19 +146,19 @@ EvaluationRun 并下载 JSON/Markdown 报告。
 | Compose 配置解析 | `docker compose config --quiet` | Compose 文件语法；`DEVLOG.md` 曾记录该检查 |
 | 启动依赖 | `make infra-up`；`docker compose ps` | 仅启动/观察 PostgreSQL、Redis、MinIO；`Makefile`、`docker-compose.yml` |
 | 后端依赖 | `cd backend && uv sync --extra dev --frozen` | CI 安装锁定依赖；`.github/workflows/ci.yml` |
-| 后端单元/API 测试 | `cd backend && uv run pytest -q` | `pyproject.toml` 的 `testpaths`；`Makefile:backend-test` |
+| 后端单元/API 测试 | `cd backend && uv run pytest -q` | 单元测试始终运行；DB/API 测试仅接受名称以 `_test` 结尾的隔离数据库；`tests/conftest.py`、CI integration job |
 | 诊断/评测窄测 | `cd backend && uv run pytest -q tests/test_diagnosis_orchestrator.py tests/test_evaluation.py tests/test_evaluation_api.py` | 对应工作流与 API；测试文件名 |
 | 后端 lint | `cd backend && uv run ruff check .` | `pyproject.toml` 与 CI |
 | 后端格式 | `cd backend && uv run ruff format --check .` | `Makefile` 与 CI |
 | Migration | `cd backend && uv run alembic upgrade head` | 需要 PostgreSQL；会改变数据库状态，执行前遵守停止条件 |
 | 前端依赖 | `cd frontend && pnpm install --frozen-lockfile` | `frontend/pnpm-lock.yaml`、CI |
 | 前端 lint/typecheck/build | `cd frontend && pnpm lint`；`pnpm typecheck`；`pnpm build` | `frontend/package.json`、CI |
-| 前端测试脚本 | `cd frontend && pnpm test` | 当前脚本是退出成功的 placeholder，不等价于单元测试；`frontend/package.json` |
+| 前端单元测试 | `cd frontend && pnpm test` | Vitest + Testing Library；当前覆盖 Eval Lab 的 B0/B1 提交与回退展示；`frontend/package.json`、`frontend/app/eval/page.test.tsx` |
 | OpenAPI/TS 契约同步 | `make gen-openapi` | `backend/scripts/export_openapi.py` + `frontend` 的 `gen:api` |
 | 契约漂移检查 | `git diff --exit-code backend/openapi.json`；`git diff --exit-code frontend/lib/api/schema.ts` | CI `openapi-drift` job |
 | 本地 B0 评测 | `cd backend && uv run python scripts/evaluate_rule_based.py --out data/evaluations` | 无数据库/付费模型调用的脚本路径；`backend/scripts/evaluate_rule_based.py` |
 | 聚合目标 | `make lint`；`make test` | Makefile 聚合 backend/frontend 检查 |
-| E2E | `make e2e` | 当前仅打印 placeholder；`Makefile` |
+| E2E | `make e2e` | 显式运行 `backend/tests/e2e/`；需要完整 Stack、浏览器、E2E extra 与模型配置 |
 
 `docker compose up`、Migration、评测脚本和前端安装都会触及外部或运行时状态；
 项目地图只记录它们的现有入口，不代表本任务已授权执行。

@@ -4,7 +4,7 @@
 
 .PHONY: help infra-up infra-down migrate \
         run-api run-worker run-web \
-        gen-openapi generate-scenarios evaluate-rule-based e2e \
+        gen-openapi generate-scenarios evaluate-rule-based evaluate-matrix smoke-demo e2e \
         backend-lint backend-test frontend-lint frontend-typecheck frontend-test frontend-build
 
 SHELL := /bin/sh
@@ -23,13 +23,15 @@ help:
 	@echo "  make run-api        Start FastAPI on :8000"
 	@echo "  make run-worker     Start Celery worker"
 	@echo "  make run-web        Start Next.js on :3000"
+	@echo "  make smoke-demo     Run deterministic Incident -> diagnosis API demo"
+	@echo "  make evaluate-matrix Run deterministic multi-seed B0 evaluation"
 	@echo ""
 	@echo "Contracts:"
 	@echo "  make gen-openapi    Export backend/openapi.json + regenerate frontend types"
 	@echo ""
 	@echo "Quality gates:"
 	@echo "  make lint           Ruff + ESLint"
-	@echo "  make test           Backend pytest + frontend unit tests"
+	@echo "  make test           Backend pytest + current frontend test script"
 
 infra-up:
 	@echo "[infra] Starting backing services..."
@@ -90,12 +92,18 @@ lint: backend-lint frontend-lint frontend-typecheck
 
 test: backend-test frontend-test
 
-# --- Placeholders (later milestones) ---------------------------------------
+# --- Utilities and explicit E2E --------------------------------------------
 generate-scenarios:
 	cd backend && uv run python scripts/generate_scenarios.py
 
 evaluate-rule-based:
 	cd backend && uv run python scripts/evaluate_rule_based.py
+
+evaluate-matrix:
+	cd backend && uv run python scripts/evaluate_matrix.py
+
+smoke-demo:
+	cd backend && uv run python scripts/smoke_demo.py
 
 e2e:
 	@echo "[e2e] Running browser-use E2E tests."

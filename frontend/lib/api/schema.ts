@@ -413,6 +413,16 @@ export interface components {
             latency_ms_mean?: number | null;
             /** Badcase Count */
             badcase_count: number;
+            /**
+             * Model Invocation Count
+             * @default 0
+             */
+            model_invocation_count: number;
+            /**
+             * Fallback Count
+             * @default 0
+             */
+            fallback_count: number;
             /** Total Input Tokens */
             total_input_tokens?: number | null;
             /** Total Output Tokens */
@@ -1164,6 +1174,21 @@ export interface components {
             unexplained_lost_intents?: number | null;
             /** Recommended Actions */
             recommended_actions?: string[];
+            /** Adapter Name */
+            adapter_name?: string | null;
+            /** Model Name */
+            model_name?: string | null;
+            /**
+             * Fallback Used
+             * @default false
+             */
+            fallback_used: boolean;
+            /** Fallback Reason */
+            fallback_reason?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
             /** Evidence */
             evidence?: {
                 [key: string]: unknown;

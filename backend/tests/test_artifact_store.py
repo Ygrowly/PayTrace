@@ -1,12 +1,16 @@
 """Unit tests for ArtifactStore (LocalArtifactStore + key sanitisation)."""
 
 import pytest
+from pydantic import ValidationError
 
+from app.config import Settings
 from app.harness.artifact_store import (
     ArtifactChecksumError,
     ArtifactRef,
     LocalArtifactStore,
+    MinioArtifactStore,
     _sanitize_key,
+    create_artifact_store,
 )
 
 
@@ -69,6 +73,7 @@ def test_local_store_download_url_is_file_uri(tmp_path):
 
 def test_artifact_ref_frozen():
     ref = ArtifactRef(
+        backend="minio",
         bucket="b",
         key="k",
         checksum_sha256="0" * 64,
@@ -77,3 +82,43 @@ def test_artifact_ref_frozen():
     )
     with pytest.raises(Exception):  # noqa: B017
         ref.key = "other"  # type: ignore[misc]
+
+
+def test_create_artifact_store_selects_local_backend(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        artifact_store_backend="local",
+        artifact_root=str(tmp_path),
+    )
+    store = create_artifact_store(settings)
+    assert isinstance(store, LocalArtifactStore)
+    ref = store.put_bytes("factory/roundtrip.txt", b"ok", "text/plain")
+    assert store.get_bytes(ref) == b"ok"
+
+
+def test_create_artifact_store_selects_minio_backend():
+    settings = Settings(
+        _env_file=None,
+        artifact_store_backend="minio",
+        minio_endpoint="minio.internal:9000",
+    )
+    store = create_artifact_store(settings)
+    assert isinstance(store, MinioArtifactStore)
+    assert store._client.meta.endpoint_url == "http://minio.internal:9000"
+
+
+def test_create_artifact_store_can_read_historical_backend(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        artifact_store_backend="minio",
+        artifact_root=str(tmp_path),
+    )
+
+    store = create_artifact_store(settings, backend="local")
+
+    assert isinstance(store, LocalArtifactStore)
+
+
+def test_artifact_store_backend_rejects_unknown_value():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, artifact_store_backend="s3")
