@@ -242,3 +242,577 @@ locally verified, no PR pushed), Q4=A (stacked on `feat/m0-foundation`).
 ### Next
 - Commit M0b changes on `feat/m0-foundation` (single-purpose Conventional
   Commit per repo rules), then proceed to M1 per plan.
+
+---
+
+## 2026-08-01 · M1 · Data, Ontology v1, and deterministic diagnosis tools
+
+### Scope
+M1 per plan § 7/9/13/14: Canonical Payment Event, Ontology Registry v1,
+ArtifactStore (MinIO + Local), 5-kind scenario generator with Ground Truth
+isolation, PaymentAnalyticsSource protocol + DuckDB implementation, tool
+framework (ToolResult / ToolPolicy / ToolRegistry / EvidenceLedger), four
+deterministic diagnosis tools, and dataset quality validation.
+
+### Implemented
+- `backend/app/domain/events.py` — Canonical Payment Event pydantic model
+  (plan § 8): `EventType`, `FunnelStage` (9 stages, `FUNNEL_STAGE_ORDER`),
+  `EventStatus`, `Period`; field-level validation (non-negative amounts,
+  minor-unit integers, UTC timestamps).
+- `backend/app/ontology/registry.py` — Ontology v1
+  (`paytrace.ontology.v1`): 13 objects, 6 evidence types
+  (`FUNNEL_STAGE_DEGRADATION`, `DIMENSION_CONTRIBUTION`,
+  `BENEFIT_GAP_FRICTION`, `CHANNEL_TIMEOUT`, `ERROR_CODE_CONCENTRATION`,
+  `DATA_QUALITY_GAP`), links, metrics, dimensions, actions; cross-reference
+  validation at load. `GET /api/v1/ontology` now serves the real registry
+  (was the M0b placeholder).
+- `backend/app/harness/artifact_store.py` — `ArtifactStore` protocol +
+  `ArtifactRef`; `MinioArtifactStore` (boto3, `put_bytes` / `get_bytes` /
+  `create_download_url`) and `LocalArtifactStore` (tmp-dir backed, same
+  contract) for tests.
+- `backend/app/harness/scenarios/` — deterministic generator for the 5
+  scenario kinds (`normal`, `benefit_friction`, `channel_timeout`,
+  `mixed_failure`, `data_gap`). Per-period seed derived via
+  `sha256(f"{kind}:{seed}:{period}")`; baseline period always clean;
+  `created_at` pinned to `cfg.start_time` so datasets + Ground Truth are
+  byte-reproducible. `ground_truth.py` keeps GT in a separate module with
+  `GroundTruthLoader` (path-traversal rejected); `io.py` writes Parquet via
+  pyarrow with a sha256 checksum in `DatasetRef` (which never points at
+  GT).
+- `backend/app/analytics/base.py` — `PaymentAnalyticsSource` protocol
+  (5 methods) + query/result contracts; `ALLOWED_DIMENSIONS` whitelist
+  (`payment_method`, `payment_channel`, `region`, `currency`,
+  `client_version`).
+- `backend/app/analytics/duckdb_source.py` — `DuckDBAnalyticsSource`:
+  per-call in-memory connection over `read_parquet`, parameterised value
+  filters, whitelist-validated dimension identifiers, `upper(status)`
+  normalisation (StrEnum serialises lowercase). Funnel anomaly detection
+  uses **step-rate** deltas (threshold 0.05) — overall-rate deltas are
+  diluted by upstream attrition and dimension mix (channel-timeout fault
+  moved overall rate only ~4pp at `CHANNEL_SUCCEEDED`). `validate_dataset`
+  flags per-period missing stages, duplicate `event_id`s, and high
+  `benefit_id` null rate (>0.5).
+- `backend/app/tools/base.py` — `ToolResult` / `EvidenceDraft` (§ 13),
+  `ToolPolicy` (max 8 calls, sha256 fingerprint dedup, read-only
+  enforcement, dimension whitelist), `ToolRegistry` (rejects non-read-only
+  tools, times executions), `EvidenceLedger` (assigns `EV-NNN` codes; the
+  model never creates Evidence).
+- `backend/app/tools/diagnostic.py` — the four read-only tools:
+  `get_payment_funnel`, `breakdown_conversion_loss`, `analyze_benefit_gap`,
+  `inspect_payment_events`. Each offloads its full result payload to the
+  ArtifactStore (`tool_results/{tool_call_id}/{kind}.json`) and returns a
+  summary + EvidenceDrafts. `analyze_benefit_gap` always carries the
+  "observational friction evidence, not sole causal proof" warning
+  (plan § 13.3).
+- `backend/scripts/generate_scenarios.py` — CLI writing
+  `data/scenarios/events/<kind>.parquet` +
+  `data/scenarios/ground_truth/<kind>.ground_truth.json`.
+- Tests: 72 unit + 2 MinIO integration (74 total), incl. M1 acceptance
+  tests for mixed_failure dual evidence, data_gap warnings, and large
+  tool results round-tripping through real MinIO.
+
+### Verified
+- `uv run ruff check .` clean; `uv run ruff format --check .` clean
+  (52 files).
+- `uv run pytest -q` → **74 passed** (72 unit + 2 integration against the
+  docker-compose MinIO; integration module skips cleanly when MinIO is
+  unreachable).
+- M1 acceptance (plan § 28):
+  - mixed_failure yields `BENEFIT_GAP_FRICTION` + `CHANNEL_TIMEOUT` +
+    `FUNNEL_STAGE_DEGRADATION` evidence —
+    `test_mixed_failure_produces_benefit_and_timeout_evidence` (unit) and
+    `test_mixed_failure_dual_evidence_via_minio` (integration).
+  - data_gap yields warnings — `test_validate_dataset_data_gap_warns`
+    (missing stages + benefit_id null rate > 0.5).
+  - large tool results land in MinIO —
+    `test_large_tool_result_stored_in_minio` (2000-intent dataset, artifact
+    round-trip + presigned download URL).
+- Scenario reproducibility: same `(kind, seed)` → identical sha256 digest
+  of events + GT; different seed differs
+  (`test_scenario_generator.py`).
+- DuckDB adapter does not leak into tools: tools depend only on the
+  `PaymentAnalyticsSource` protocol and ArtifactStore protocol (verified
+  structurally — `app/tools/` imports nothing from `app/analytics/duckdb_source`).
+
+### Deviations
+- **Funnel anomaly detection on step-rate, not overall-rate** (plan § 13.1
+  implies overall): overall-rate deltas are diluted by upstream attrition
+  and dimension mix; a 30% timeout on one channel moved the overall rate
+  at `CHANNEL_SUCCEEDED` by only ~4pp, under the 0.05 threshold. Step-rate
+  (conditional on reaching the previous stage) isolates the stage's own
+  behaviour (~10pp for the same fault). Documented in
+  `duckdb_source.py` comments.
+- **`read_parquet(?)` cannot be parameterised** inside `CREATE VIEW`
+  (DuckDB binder limitation): the dataset path is interpolated after
+  `Path.resolve()` + single-quote escaping; all value filters remain
+  parameterised. `# noqa: S608` with justification comments.
+- **`scripts/**/*.py` per-file-ignore `T201`**: the scenario CLI prints
+  progress to stdout by design.
+- Integration tests live in `tests/test_integration_minio.py` with a
+  module-level `skipif` reachability probe, so unit-only runs (and CI
+  without MinIO) stay green.
+
+### Risks
+- `_ANOMALY_THRESHOLD = 0.05` is tuned for the M1 dataset scale
+  (≥400 intents/period); smaller samples will breach it from binomial
+  noise alone. Revisit when the harness supports scale sweeps.
+- `MinioArtifactStore` creates a boto3 client per instance; fine for M1
+  tool-call volumes, consider a shared client if M2 parallelism demands.
+- `EvidenceLedger` is in-memory per diagnosis run; persistence to
+  `diagnosis_run_events` arrives with the M2 orchestrator.
+- MinIO integration coverage depends on local compose stack; CI has no
+  MinIO service yet (unit tests use `LocalArtifactStore`).
+
+### Next
+- M2 per plan: LangGraph diagnosis orchestrator (planner → tool loop →
+  verifier), diagnosis_run persistence, SSE event stream, first end-to-end
+  incident diagnosis on the harness scenarios.
+
+---
+
+## 2026-08-03 · M3 · Evaluation Runner and product workbench
+
+### Implemented
+- Added `evaluation_runs` persistence and Alembic migration
+  `20260803_0003_create_m3_evaluation_tables.py`, including idempotency,
+  lifecycle, configuration snapshots, aggregate metrics, scenario results,
+  badcases, timing, and report artifact keys.
+- Added the deterministic B0 evaluation runner. It materialises the five
+  harness scenarios, runs the existing diagnosis workflow, loads Ground Truth
+  only after diagnosis, computes stage/root-cause/evidence/loss metrics, and
+  writes JSON/Markdown reports to the local ArtifactStore.
+- Added EvaluationRun API and Celery task with idempotent submission,
+  dispatch-failure persistence, polling/listing, and report downloads.
+- Added deterministic simulated Incident creation and funnel inspection,
+  scenario filtering, persisted diagnosis trace/SSE replay, evidence lookup,
+  and local Artifact content/download endpoints.
+- Added the Incident list/detail and Eval Lab pages with React Query polling,
+  ECharts funnel/metric charts, SSE progress, report/badcase states, and
+  data-gap/error handling. The UI follows the M3 data-dense blue/amber
+  dashboard design system.
+- Added M3 API documentation, generated OpenAPI/TypeScript contract updates,
+  runtime scenario ignore rules, and local setup instructions.
+
+### Verified
+- Docker services: PostgreSQL, Redis, and MinIO all report healthy via
+  `docker compose ps`.
+- Migration: `uv run --no-cache alembic upgrade head` succeeded and
+  `uv run --no-cache alembic current` reports
+  `0003_create_m3_evaluation_tables (head)`.
+- Backend: `uv run pytest -q` → **124 passed**, 6 dependency deprecation
+  warnings; `uv run ruff check .` and `uv run ruff format --check .` passed.
+- M3 API subset: `uv run pytest -q tests/test_incidents_api.py
+  tests/test_evaluation_api.py` → **39 passed**.
+- Frontend: `pnpm gen:api`, `pnpm typecheck`, `pnpm lint`, and `pnpm build`
+  all passed. The production build generated `/`, `/incidents`, `/eval`, and
+  `/incidents/[id]` successfully.
+- OpenAPI export and TypeScript regeneration completed from the current
+  backend contract.
+- A real local B0 EvaluationRun completed 5 scenarios with 100% run success;
+  JSON and Markdown report artifacts were persisted for manual UI inspection.
+- `git diff --check` passed; only existing line-ending normalization warnings
+  were reported by Git.
+
+### Deviations
+- The frontend has no unit-test runner in this milestone; the user requested
+  to perform browser acceptance manually. Browser validation was therefore not
+  run by Codex and remains the user's final acceptance step.
+- M3 exposes B0 (`RuleBasedModelAdapter`) only; paid/model-backed B1 execution
+  remains outside this milestone.
+
+### Risks
+- The API and EvaluationRun worker require the local Docker services and a
+  running Celery worker; the frontend alone cannot execute queued work.
+- Runtime scenario files and local report artifacts are intentionally local
+  and ignored by Git.
+
+### Next
+- Start the API, Celery worker, and frontend, then manually verify the
+  Incident and Eval Lab flows in the browser.
+
+---
+
+## 2026-08-10 · Post-M3 · P0 & P1 — B1 adapter, 6-tool workflow, cancel/reorder + config-change scenarios
+
+### Implemented
+- `backend/app/diagnosis/adapter.py` (+246 lines): `OpenAICompatibleModelAdapter`
+  for plan § 15.2. Reads `model_base_url`, `model_api_key`, `model_name`
+  from `Settings`; when the key or base URL is empty, or the upstream call
+  raises, it logs a warning and falls back to `RuleBasedModelAdapter`. Token
+  usage is exposed on `last_usage` for trace/evaluation consumers.
+- `backend/app/diagnosis/prompts.py` (new, 66 lines): `PROMPT_VERSION`,
+  `DIAGNOSIS_SYSTEM_PROMPT_V1`, `DIAGNOSIS_USER_PROMPT_V1`. The OpenAI
+  adapter appends the JSON output schema to the system prompt and requests
+  `response_format={"type": "json_object"}` at `temperature=0.0`.
+- `backend/app/diagnosis/orchestrator.py` (+22 lines): the fixed workflow
+  grew from 4 to 6 tools — `trace_cancel_and_reorder` and `get_config_changes`
+  run unconditionally after `inspect_payment_events`, before the conditional
+  `breakdown_conversion_loss`.
+- `backend/app/tools/diagnostic.py` (+116 lines): the two new read-only tools
+  plus evidence-draft construction for cancel→reorder→switch and
+  config-change signals.
+- `backend/app/harness/scenarios/generator.py` (+94 lines), `ground_truth.py`
+  (+4): deterministic cancel-flow and config-change injection plus Ground
+  Truth fields for the new evidence types.
+- `backend/app/ontology/registry.py` (+10): new evidence types
+  (`CANCEL_REORDER_FLOW`, `CONFIG_CHANGE`) and supporting links/actions.
+- `backend/app/analytics/base.py` (+72), `duckdb_source.py` (+153): new
+  result models and DuckDB queries for cancel/reorder traces and
+  config-change relevance.
+- `backend/app/evaluation/runner.py` (+36), `schemas.py` (B0 → `B0|B1`):
+  B1 branch instantiates `OpenAICompatibleModelAdapter` from settings.
+- Tests: `test_diagnosis_orchestrator.py` (+57), `test_evaluation.py`
+  (+51), `test_scenario_generator.py` (+76), `test_tools.py` (+137) —
+  321 new test lines covering the two new tools, B1 fallback, and the two
+  new scenario kinds.
+- `backend/pyproject.toml` (+1), `uv.lock` (+110): added the `openai`
+  dependency used by `OpenAICompatibleModelAdapter`.
+
+### Verified
+- Verification source: commit `b89cb4d` message (2026-08-12, post-review
+  fix commit) records "107 non-DB tests passed, ruff check clean, ruff
+  format clean, docker compose config validated". That commit ran after
+  P0 & P1 were stabilised and is the closest available evidence that the
+  P0 & P1 test additions pass alongside the rest of the suite.
+- This audit did **not** re-run `pytest`, `ruff`, or `docker compose
+  config`; the result above is cited, not reproduced.
+
+### Deviations
+- `EvaluationRunCreate.model_mode` was widened from `Literal["B0"]` to
+  `Literal["B0", "B1"]` in the same commit, which expanded the public API
+  beyond the M3 acceptance scope (M3 called for B0 only). The Runner
+  still rejects anything outside `{"B0","B1"}`.
+- The orchestrator docstring still described a 4-tool pipeline until
+  `b89cb4d` corrected it — see the 2026-08-12 entry.
+
+### Risks
+- B1 falls back to rule-based on any exception (`# noqa: BLE001`), so a
+  misconfigured `model_base_url` or transient API failure is
+  indistinguishable from a real rule-based run in the persisted report
+  unless `model_name` is inspected. The runner does not record whether
+  fallback fired.
+- The OpenAI adapter swallows all exceptions; downstream consumers cannot
+  tell a network error from a model-side refusal.
+
+### Next
+- Track fallback events in `DiagnosisRunEvent` so B1 reports can be
+  audited for "actually called the model" vs "fell back".
+
+---
+
+## 2026-08-11 · Post-M3 · P2 — Full-stack compose, Dockerfiles, stale-run recovery, observability
+
+### Implemented
+- `Dockerfile.backend` (new, 41 lines), `Dockerfile.frontend` (new, 32
+  lines): container images for the `full` compose profile.
+- `docker-compose.yml` (+97): `api`, `worker`, `beat`, `web` services under
+  the `full` profile; `api`/`worker`/`beat` share the same image and depend
+  on healthy postgres/redis/minio; `web` builds from `Dockerfile.frontend`.
+- `Makefile` (+20): `full-up`, `full-down`, `generate-scenarios`,
+  `evaluate-rule-based` targets (the `e2e` target remains a placeholder).
+- `backend/app/tasks/stale_scan.py` (new, 123 lines): periodic Celery task
+  `scan_stale_runs` that force-fails DiagnosisRuns and EvaluationRuns stuck
+  in `RUNNING`/`QUEUED`/`COLLECTING_EVIDENCE`/`GENERATING_REPORT`/`VALIDATING`
+  beyond the timeout window. Uses a `_db()` contextmanager.
+- `backend/app/tasks/celery_app.py` (+38): `task_soft_time_limit=120`,
+  `task_time_limit=180`; `beat_schedule` runs `scan_stale_runs` every 5
+  minutes (`crontab(minute="*/5")`, `expires=240`); `worker_ready` signal
+  runs an immediate stale scan as layer 2 of the 3-layer recovery.
+- `backend/app/observability/__init__.py` (new, 121 lines): structured
+  logging helpers and Trace ID propagation support.
+- `backend/app/tasks/diagnosis.py` (+2), `tasks/evaluation.py` (+2): emit
+  structured log fields for run lifecycle events.
+- `backend/app/incidents/service.py` (+28): helpers for stale-state
+  recovery and run lifecycle queries.
+- `docs/architecture.md` (+87), `docs/demo-script.md` (+62),
+  `docs/domain-model.md` (+92): substantial content fills replacing prior
+  placeholders.
+
+### Verified
+- Verification source: commit `b89cb4d` message (2026-08-12) records
+  "docker compose config validated" — `compose --profile full` parse is
+  the only P2 verification evidence available from the commit history.
+- This audit did **not** re-run `docker compose config`, build the
+  images, or start the full stack. The compose file was inspected by
+  this audit (see the review report's docker-compose section) and shows
+  the four `full`-profile services with healthy-dependency wiring.
+
+### Deviations
+- The `e2e` Makefile target was left as a placeholder; P2 did not deliver
+  Playwright E2E (see Risks).
+- `docs/architecture.md`, `docs/domain-model.md`, and `docs/demo-script.md`
+  were filled with content but the AI docs (`docs/ai/`) and `rules.md` were
+  not refreshed in the same commit — that drift is being corrected by this
+  audit (see 2026-08-13 entries below).
+
+### Risks
+- No E2E or frontend unit tests were added; `frontend/package.json` still
+  ships the M0b placeholder `test` script.
+- The Beat schedule and `soft_time_limit`/`time_limit` were not
+  exercised against a running worker in P2; only `b89cb4d` later aligned
+  the stale-scan timeout (10 min) with the diagnosis task timeout.
+
+### Next
+- Add E2E and frontend unit tests; run the full stack on a clean
+  environment to verify the Beat schedule and time limits actually fire.
+
+---
+
+## 2026-08-12 · Post-M3 · P0–P2 review fixes — 28 issues across 3 critical, 3 high, 7 medium, 8 low
+
+### Implemented
+- `backend/app/tasks/diagnosis.py`: removed the pre-Celery-retry `FAILED`
+  state update that could deadlock the state machine; cleaned up the
+  retry path.
+- `backend/app/analytics/duckdb_source.py`: config-change relevance now
+  limited to payment-relevant changes (not all changes); removed the
+  fragile string-based window-split heuristic.
+- `backend/app/tasks/stale_scan.py`: timeout aligned to 10 minutes
+  (was 5) so the periodic scanner cannot preempt a legitimately slow
+  diagnosis task whose own timeout is 10 min; standardised on the `_db()`
+  contextmanager pattern.
+- `backend/app/tools/diagnostic.py`: `get_config_changes` now creates
+  evidence only for `relevant_changes`, not all changes; added defensive
+  `next(..., default)` for the anomalous-stage delta lookup.
+- `backend/app/diagnosis/adapter.py`: `RuleBasedModelAdapter` now emits
+  recommended actions for `CANCEL_REORDER_FLOW` and `CONFIG_CHANGE` evidence
+  types.
+- `backend/app/diagnosis/orchestrator.py`: docstring corrected to
+  describe the 6-tool workflow (was still describing the 4-tool pipeline).
+- `backend/app/observability/__init__.py`: docstring import paths fixed.
+- `backend/app/incidents/service.py`: `timedelta` import moved to module
+  level (was imported locally).
+- `backend/tests/test_analytics_source.py` (+64): 6 new tests for
+  cancel/reorder and config-change query paths.
+
+### Verified
+- Verification source: commit `b89cb4d` message records
+  "107 non-DB tests passed, ruff check clean, ruff format clean, docker
+  compose config validated."
+- This audit did **not** re-run `pytest`, `ruff`, or `docker compose
+  config`; the result above is cited verbatim from the commit, not
+  reproduced.
+
+### Deviations
+- The 107-test count is "non-DB" only — PostgreSQL/MinIO integration
+  tests were not in this verification run. Full-suite verification remains
+  outstanding.
+- The audit (this turn) discovered a separate `Makefile` bug — duplicate
+  `infra-up`/`infra-down` targets — that was not flagged in the 28-issue
+  review. Fixed in the 2026-08-13 entry below.
+
+### Risks
+- Without a full-suite run (including PostgreSQL-backed tests), the
+  stale-scan timeout alignment and the diagnosis.py retry-path rewrite
+  are verified only by unit tests, not by an end-to-end worker run.
+- `b89cb4d` is the last commit on `feat/m3-eval-and-product`; M4
+  acceptance (E2E, frontend tests, clean-environment replay) has not
+  been run.
+
+### Next
+- Run the full test suite (including integration tests against the
+  docker-compose stack) and proceed to the remaining M4 items.
+
+---
+
+## 2026-08-13 · M4 (partial) · browser-use E2E framework + dependency upgrade
+
+### Implemented
+- `backend/tests/e2e/` — browser-use driven E2E suite:
+  - `conftest.py` — collection-time prerequisite gates (browser_use
+    importable, `MODEL_API_KEY` set, API + Web reachable) that skip the
+    whole suite when unmet; `_find_chrome()` locates Chrome/Edge on
+    Windows and passes `executable_path` explicitly (browser-use
+    auto-detection times out on Windows); `e2e_llm` wires
+    `ChatOpenAI(model/ api_key/ base_url from app Settings)` with
+    `dont_force_structured_output=True` (required — DeepSeek returns
+    HTTP 400 for `response_format`); `e2e_browser` yields a headless
+    `Browser` and closes it in teardown.
+  - `test_smoke.py` — 3 LLM-driven smoke tests (homepage, /incidents,
+    /eval) that ask the agent to return a small JSON and assert on the
+    parsed result.
+- `backend/pyproject.toml`:
+  - new `e2e` extra: `browser-use>=0.13.0,<0.14.0`;
+  - pytest `markers = ["e2e: ..."]` and `addopts = "-m 'not e2e'"` so
+    the default `pytest -q` (dev + CI) deselects E2E;
+  - core dependency constraints widened to accommodate browser-use
+    0.13.x pins: `pydantic>=2.9,<2.13` (was <2.10),
+    `pydantic-settings>=2.5,<2.9` (was <2.6), `openai>=1.60,<3.0`
+    (was <2.0), `uvicorn>=0.30,<0.33` (was <0.31), `httpx>=0.27,<0.29`
+    (was <0.28, dev extra).
+- `Makefile` — `e2e` target now runs
+  `uv run pytest tests/e2e/ -m e2e -o "addopts=" -v` after printing
+  the required prerequisites (replaces the M3 placeholder).
+- `backend/tests/test_evaluation.py` —
+  `test_b1_mode_falls_back_to_rule_based_when_no_api_key` now
+  monkeypatches `app.evaluation.runner.get_settings` to return empty
+  model credentials. Root cause of the prior flake: `.env` contains a
+  real `MODEL_API_KEY`, so B1 actually called the LLM (DeepSeek) — the
+  openai 1.x→2.x upgrade changed the call from "error → fallback" to
+  "success → LLM output", and the LLM's non-deterministic answer broke
+  the test. The test now exercises the fallback path deterministically.
+- `backend/openapi.json` + `frontend/lib/api/schema.ts` regenerated:
+  the old artifacts predated the B0→B1 `model_mode` change (P0 & P1)
+  and pydantic 2.12 alters schema emission (removes some `enum`/
+  `const` blocks, adds `additionalProperties: true`).
+- `frontend/app/eval/page.tsx` — `asBadcase` parameter type changed
+  from `Record<string, never>` to `{ [key: string]: unknown }` to match
+  the regenerated schema (pydantic 2.12 emits `additionalProperties:
+  true` for the badcases list items).
+
+### Verified
+- `uv run ruff check .` → All checks passed!;
+  `uv run ruff format --check .` → 89 files already formatted.
+- `uv run pytest -q` → **151 passed, 3 deselected** (the 3 E2E smoke
+  tests deselected via addopts), 6 warnings, 13.86s. Previously the
+  suite took ~78s because the B1 test called DeepSeek; after the
+  monkeypatch fix it is deterministic and fast.
+- E2E skip gates: `uv run pytest tests/e2e/ -m e2e -o "addopts=" -v`
+  with the stack down → 3 skipped (prerequisite reasons).
+- E2E smoke against a live stack: started API on :8001 and
+  `pnpm dev` with `PAYTRACE_API_BASE`/`NEXT_PUBLIC_PAYTRACE_API_BASE`
+  pointing at :8001 (port 8000 was already occupied by an unrelated
+  anaconda python process, left untouched), then
+  `E2E_API_URL=http://localhost:8001 uv run pytest tests/e2e/ -m e2e -o "addopts=" -v`
+  → **3 passed in 112.59s** (homepage, incidents list, eval lab).
+- Contract drift after regen: `pnpm typecheck` → passed;
+  `pnpm build` → passed (4 routes); `pnpm lint` → passed.
+- `docker compose` services stayed healthy throughout (postgres, redis,
+  minio).
+
+### Deviations
+- **Core dependency upgrades** (user-confirmed): pydantic 2.9→2.12,
+  openai 1.x→2.x, uvicorn 0.30→0.32, httpx 0.27→0.28 were required
+  because every browser-use release (0.6.3–0.13.7) requires
+  `pydantic>=2.11.5` and 0.13.x pins `openai==2.16.0`, `httpx==0.28.1`,
+  `uvicorn>=0.31.1` transitively via `mcp==1.26.0`.
+- **E2E port**: local port 8000 is occupied by an unrelated anaconda
+  python process; the E2E run above used :8001 with
+  `E2E_API_URL`/`PAYTRACE_API_BASE` overrides. The Makefile `e2e`
+  target still defaults to :8000 — a future dev-session run on this
+  machine needs the same override or the port must be freed.
+- **browser-use internals depend on LangChain core** (indirectly, via
+  its `ChatOpenAI` model classes). Plan § 0.7 forbids LangChain as an
+  *agent orchestration framework*; browser-use is used here only as an
+  E2E driver, and the agent loop is browser-use's, not LangChain's.
+  Recorded here to keep the dependency boundary explicit.
+- **next-env.d.ts**: `pnpm build` rewrites
+  `frontend/next-env.d.ts` (dev→build routes path); reverted after each
+  build as an untracked-in-intent side effect.
+
+### Risks
+- E2E is LLM-driven and non-deterministic by design; a passing run is
+  evidence the pages render, not a regression gate. The JSON extraction
+  in `test_smoke.py` tolerates malformed output by failing loudly, but
+  flaky LLM answers remain possible.
+- `uv.lock` grew by ~5,000 lines (browser-use's dependency tree
+  includes mcp, google-genai, anthropic, groq, posthog, etc.). This
+  expands the supply-chain surface substantially for an E2E-only
+  extra; consider re-pinning after the next browser-use release.
+- B1 evaluation with a real `MODEL_API_KEY` still calls the paid LLM
+  outside the test suite; only the *fallback* path is covered by
+  automated tests. A real-model B1 evaluation remains unverified.
+- The `.env` `MODEL_API_KEY` was read during debugging (grep of `.env`
+  while diagnosing the B1 test failure). It was not committed, but the
+  user should consider rotating it since it appeared in session output.
+
+### Next
+- User manually runs `make e2e` on a clean full-stack session to
+  confirm the standard (port 8000) path.
+- Optional: `make full-up` containerised E2E run; add E2E tests for the
+  incident-create → diagnosis → report flow.
+- Rotate the `.env` DeepSeek key if the session output is not trusted.
+
+---
+
+## 2026-08-13~14 · M4 (closure) · E2E diagnosis flow, worker bug fixes, B1 eval, CI green
+
+### Implemented
+- `backend/tests/e2e/test_diagnosis_flow.py` — E2E diagnosis flow test:
+  API creates a simulated incident, triggers diagnosis, polls to a
+  terminal state (deterministic half), then browser-use verifies the
+  detail-page report and the incidents list (LLM half).
+- `backend/tests/e2e/helpers.py` — shared `run_agent`/`extract_json`.
+- `backend/tests/e2e/conftest.py` — `_reachable` now retries twice with
+  a 5s timeout (was one 2s attempt) to avoid transient skips.
+- `backend/app/incidents/service.py` — diagnosis state machine now
+  allows `RUNNING → SUCCEEDED/NEEDS_DATA`.
+- `backend/migrations/versions/20260813_0004_relax_root_cause_category.py`
+  — `root_cause_findings.category` dropped NOT NULL to match the ORM.
+- `backend/tests/test_incidents_api.py` — 2 regression tests for the
+  new RUNNING transitions.
+- `backend/tests/conftest.py` — module-level `pytestmark =
+  skipif(...)` is NOT applied by pytest 8.3.5 (verified with a minimal
+  repro), so DB tests were previously run — not skipped — when PG was
+  unreachable. Replaced with `pytest_collection_modifyitems` that adds
+  a skip marker to all items when the PG probe fails.
+- PR #1 opened against `master` (remote default branch is `main`,
+  which shares no history with this branch).
+
+### Verified
+- **Two worker-blocking bugs found by the E2E flow test and fixed**:
+  1. `Invalid state transition: RUNNING → SUCCEEDED` — every real
+     diagnosis task crashed and stayed RUNNING until the stale scanner
+     force-failed it (10 min later).
+  2. `NotNullViolation` on `root_cause_findings.category` — normal
+     scenarios (category=None) crashed `persist_report`.
+  After both fixes the E2E flow test's deterministic half passes
+  (run reaches SUCCEEDED; detail-page and list verification pass on
+  runs where the LLM output parses).
+- Stale-run recovery (task 2): controlled experiment — a RUNNING run
+  aged 11 min was force-failed by `_do_scan()` with
+  `STALE_RUN_TIMEOUT` and `finished_at` set; the layer-2 worker_ready
+  scan had already cleaned earlier stuck runs.
+- Fresh-clone reproduction (task 4): `git clone` → `cp .env.example
+  .env` → `uv sync --extra dev` → `ruff check` clean → `pytest -q`
+  153 passed → `pnpm install --frozen-lockfile` → `pnpm typecheck` →
+  `pnpm build` → `alembic upgrade head` (0004 head). Temp clone
+  removed afterwards.
+- **CI on PR #1: all 4 jobs green** — backend lint+test (153 passed,
+  5 deselected), frontend lint+typecheck+build, infra up+migrate,
+  openapi drift. Two CI-only issues were fixed along the way: the
+  conftest skip regression above, and a ruff-format miss on
+  `tests/conftest.py`.
+- **B1 real-model evaluation (task 6)** — model `step-3.7-flash` via
+  stepfun (`MODEL_BASE_URL=https://api.stepfun.com/v1`; the earlier
+  `.env` value `.../step_plan` returned 404 and was corrected):
+  5 scenarios (normal/benefit_friction/channel_timeout/mixed_failure/
+  data_gap), seed 42, 500 intents — run_success_rate 1.0,
+  stage_localization_exact_rate 0.5, overlap_mean 0.5,
+  root_cause_precision/recall/F1 1.0, evidence_validity 1.0,
+  badcases: STAGE_MISS on benefit_friction. B0 on the same 5-scenario
+  config scores F1 1.0 as well; B1 adds no root-cause regression.
+- `uv run pytest -q` → 153 passed, 5 deselected; ruff check/format
+  clean (92 files).
+
+### Deviations
+- `git commit --amend` + `push --force-with-lease` was used once for
+  the conftest format fix (the branch is a personal feature branch;
+  no force push to master/main).
+- E2E detail-page verification remains LLM-flaky with flash-tier
+  models: DeepSeek flash and step-3.7-flash intermittently emit
+  invalid browser-use actions or markdown-fenced JSON. The list-page
+  check is stable. The deterministic half of the flow test is the
+  regression gate; the LLM half is best-effort UI confirmation.
+- `.env` was switched by the user from DeepSeek to stepfun
+  (`step-3.7-flash`); `MODEL_BASE_URL` corrected from
+  `https://api.stepfun.com/step_plan` (404) to
+  `https://api.stepfun.com/v1` (200, verified by curl).
+
+### Risks
+- `make full-up` image build is blocked by the local network —
+  `auth.docker.io` times out and no `python:3.12-slim`/node base
+  images are cached. Compose config and Dockerfiles are unverified
+  until the network recovers.
+- The remote default branch is `main` (8e4dede) while development
+  targets `master` (bc2804b); PRs must pass `--base master` explicitly
+  or GitHub rejects them ("no history in common").
+- E2E LLM flakiness (above) is inherent to flash-tier models; a
+  stronger model or a deterministic CDP-based verifier would remove
+  it, at the cost of either latency/cost or the LLM-driven workflow.
+
+### Next
+- Retry `make full-up` when Docker Hub is reachable.
+- Optionally merge PR #1 once reviewed.
+- Consider a deterministic (CDP/evaluate-based) E2E verifier for the
+  detail page to replace the flaky LLM assertion.

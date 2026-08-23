@@ -41,7 +41,7 @@ jobs:
         run: uv run pytest -q
 
   frontend:
-    name: Frontend lint + typecheck + build
+    name: Frontend test + lint + typecheck + build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,6 +65,10 @@ jobs:
         working-directory: frontend
         run: pnpm lint
 
+      - name: Unit tests
+        working-directory: frontend
+        run: pnpm test
+
       - name: Typecheck
         working-directory: frontend
         run: pnpm typecheck
@@ -72,6 +76,113 @@ jobs:
       - name: Build
         working-directory: frontend
         run: pnpm build
+
+  demo-smoke:
+    name: Deterministic public demo smoke
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: paytrace_test
+      DATABASE_URL: postgresql+psycopg://paytrace:paytrace_dev@localhost:5432/paytrace_test
+      PAYTRACE_API_BASE: http://localhost:8000
+      NEXT_PUBLIC_PAYTRACE_API_BASE: http://localhost:8000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Start backing services
+        run: docker compose up -d postgres redis minio minio-init
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if docker exec paytrace-postgres pg_isready -U paytrace -d paytrace_test >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs postgres
+          exit 1
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --extra dev --extra e2e --frozen
+
+      - name: Migrate isolated database
+        working-directory: backend
+        run: uv run alembic upgrade head
+
+      - name: Install and build frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Start API, worker, and web
+        run: |
+          cd backend
+          nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 >/tmp/paytrace-api.log 2>&1 &
+          nohup uv run celery -A app.tasks.celery_app worker -l info -P solo >/tmp/paytrace-worker.log 2>&1 &
+          cd ../frontend
+          nohup pnpm start >/tmp/paytrace-web.log 2>&1 &
+
+      - name: Wait for application
+        run: |
+          for i in {1..60}; do
+            if curl --fail --silent http://localhost:8000/api/v1/health/ready >/dev/null \
+              && curl --fail --silent http://localhost:3000 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run deterministic API demo
+        working-directory: backend
+        run: uv run python scripts/smoke_demo.py --timeout 180
+
+      - name: Run deterministic browser smoke
+        working-directory: backend
+        run: uv run pytest tests/e2e/test_deterministic.py -m deterministic_e2e -o "addopts=" -v
+
+      - name: Run small multi-seed evaluation gate
+        working-directory: backend
+        run: >-
+          uv run python scripts/evaluate_matrix.py
+          --out ../output/evaluations/ci
+          --seeds 11,42
+          --intents 100
+
+      - name: Upload evaluation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: paytrace-demo-evaluation-matrix
+          path: output/evaluations/ci
+
+      - name: Print service logs
+        if: always()
+        run: |
+          test -f /tmp/paytrace-api.log && tail -n 200 /tmp/paytrace-api.log || true
+          test -f /tmp/paytrace-worker.log && tail -n 200 /tmp/paytrace-worker.log || true
+          test -f /tmp/paytrace-web.log && tail -n 200 /tmp/paytrace-web.log || true
 
   openapi-drift:
     name: OpenAPI & schema drift check
@@ -121,12 +232,13 @@ jobs:
         run: git diff --exit-code frontend/lib/api/schema.ts
 
   integration:
-    name: Infra up + migrate
+    name: PostgreSQL integration
     runs-on: ubuntu-latest
     env:
       # GHA runners have no local postgres on 5432, so we map the container
       # to the standard port here (dev machines use 54320 via .env).
       POSTGRES_PORT: "5432"
+      POSTGRES_DB: paytrace_test
     steps:
       - uses: actions/checkout@v4
 
@@ -144,7 +256,7 @@ jobs:
       - name: Wait for postgres healthy
         run: |
           for i in {1..30}; do
-            if docker exec paytrace-postgres pg_isready -U paytrace -d paytrace >/dev/null 2>&1; then
+            if docker exec paytrace-postgres pg_isready -U paytrace -d paytrace_test >/dev/null 2>&1; then
               echo "postgres ready"
               exit 0
             fi
@@ -160,10 +272,16 @@ jobs:
       - name: Run migrations
         working-directory: backend
         env:
-          DATABASE_URL: postgresql+psycopg://paytrace:paytrace_dev@localhost:5432/paytrace
+          DATABASE_URL: postgresql+psycopg://paytrace:paytrace_dev@localhost:5432/paytrace_test
         run: uv run alembic upgrade head
+
+      - name: Run tests against isolated database
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+psycopg://paytrace:paytrace_dev@localhost:5432/paytrace_test
+        run: uv run pytest -q
 
       - name: Verify tables exist
         run: |
-          docker exec paytrace-postgres psql -U paytrace -d paytrace -c "\dt" \
+          docker exec paytrace-postgres psql -U paytrace -d paytrace_test -c "\dt" \
             | grep -E "incidents|diagnosis_runs|diagnosis_run_events"

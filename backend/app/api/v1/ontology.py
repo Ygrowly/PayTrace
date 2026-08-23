@@ -1,19 +1,14 @@
-"""Ontology placeholder (plan § M0b). Real Ontology v1 ships in M1."""
+"""Ontology API (plan § 7). Serves the validated v1 registry."""
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+
+from app.ontology.registry import REGISTRY, OntologyRegistry
 
 router = APIRouter()
 
 
-class OntologyPlaceholder(BaseModel):
-    version: str
-    note: str
-
-
-@router.get("/ontology", response_model=OntologyPlaceholder)
-async def get_ontology() -> OntologyPlaceholder:
-    return OntologyPlaceholder(
-        version="v0-placeholder",
-        note="Ontology v1 will be introduced in M1 per plan § 7.",
-    )
+@router.get("/ontology", response_model=OntologyRegistry)
+async def get_ontology() -> OntologyRegistry:
+    """Return the full v1 Ontology registry (objects, links, metrics,
+    dimensions, actions, evidence types)."""
+    return REGISTRY

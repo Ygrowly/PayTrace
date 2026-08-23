@@ -58,6 +58,8 @@ minio_data/
 # --- Generated scenario data (large, local only) ---
 data/scenarios/*.parquet
 data/scenarios/*.json
+data/scenarios/**/*.parquet
+data/scenarios/**/*.json
 !data/scenarios/.gitkeep
 
 # --- Local artifacts / traces ---

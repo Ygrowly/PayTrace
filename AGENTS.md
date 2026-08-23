@@ -1,63 +1,78 @@
-# PayTrace AI Coding Rules
+# PayTrace AI Coding Baseline
 
-This file contains only long-term rules that apply to every task. Architecture, milestones, directory structure, dependency versions, and commands belong in project docs, ADRs, README, Makefile, or the current Task Spec — do not duplicate them here.
+This file contains only the repository's source-of-truth order, task routing,
+safety stop conditions, and verification principles. Current project facts live
+in `docs/ai/project-map.md`; evidence-backed stable rules live in
+`docs/ai/rules.md`; current work state lives in `docs/ai/progress.md`.
 
-## 1. Facts and Priorities
+## Source of Truth
 
-- The user's current instructions and the confirmed Task Spec define the goal, scope, and acceptance criteria for this task.
-- Code, tests, and actual command output define the current implementation state; planning documents cannot prove a feature is implemented.
-- Before modifying, read the related code, tests, and project docs, and check `git status --short`.
-- Stop and ask the user before proceeding if any of the following occur: the requirement has multiple interpretations that would change the result; documents substantively conflict; the scope needs to expand; or the change alters a confirmed public contract or technical direction.
-- Do not overwrite, delete, revert, or format user changes unrelated to the current task.
+Use this order when sources disagree:
 
-## 2. Workflow
+1. The user's current request and the confirmed Task Spec define scope and
+   acceptance criteria.
+2. Executable code, ORM/migration Schema, tests, and actual command output
+   define the implementation state. Relevant evidence entry points are
+   `backend/app/`, `backend/migrations/`, `backend/tests/`, `frontend/`,
+   `Makefile`, and `.github/workflows/ci.yml`.
+3. `backend/openapi.json` and `frontend/lib/api/schema.ts` are contract
+   artifacts that must agree with the route code and generation commands.
+4. README files, ADRs, `DEVLOG.md`, and development plans provide context or
+   recorded decisions. They do not prove that current code implements a claim;
+   `DEVLOG.md` records implemented and verified facts only.
 
-Execute in the following order:
+Do not turn an inference, a plan, or an un-run command into an implementation
+fact. Keep this file free of directory inventories, milestones, dependency
+versions, and business rules; those belong in the three `docs/ai/` files or the
+existing project sources.
 
-1. **Explore**: Locate entry points, call chains, data flow, existing patterns, tests, and affected scope — do not write code first.
-2. **Plan**: State the goal, non-goals, files to modify, risks, and verification approach.
-3. **Implement**: Make only the smallest complete change needed to satisfy the current acceptance criteria.
-4. **Verify**: Run checks, read results, fix failures until acceptance can be judged.
-5. **Review**: Inspect the final diff for correctness, security, test authenticity, and scope.
-6. **Report**: Report changes, evidence, unverified items, limitations, and risks.
+## Task Routing
 
-A plan is mandatory before implementation if any of the following apply: multiple modules are modified; a public API, schema, or persistent structure is changed; a dependency is added or upgraded; or the work involves state machines, async tasks, concurrency, transactions, idempotency, migrations, or security boundaries. For text-only, comment-only, or single-point low-risk changes, you may implement directly, but you must not skip verification.
+| Task kind | Start with | Keep in sync and verify |
+| --- | --- | --- |
+| AI baseline or repository map | `AGENTS.md`, `docs/ai/` | Only the requested AI documents; `git diff --check` |
+| HTTP API or contract | `backend/app/main.py`, `backend/app/api/v1/`, related schemas/tests | `backend/openapi.json`, `frontend/lib/api/schema.ts`, API tests, `make gen-openapi` |
+| Persistence or state transition | `backend/app/db/`, `backend/migrations/`, the owning service and tests | Migration chain, referential checks, targeted tests, then backend checks |
+| Diagnosis, tools, analytics, or harness | The matching package under `backend/app/` plus its tests | The protocol/model boundary, fixtures, and targeted tests |
+| Evaluation | `backend/app/evaluation/`, `backend/app/tasks/evaluation.py`, evaluation API/tests | Report artifacts, Ground Truth isolation, targeted evaluation tests |
+| Frontend page or API use | `frontend/app/`, `frontend/components/`, `frontend/lib/`, `frontend/hooks/` | Generated API types, lint, typecheck, and build |
+| Runtime or infrastructure | `docker-compose.yml`, `backend/app/config.py`, `infra/`, CI | Configuration parsing, health/migration checks; ask before stateful changes |
 
-## 3. Implementation Constraints
+When a change crosses rows, inspect every affected call site, contract, schema,
+and test before editing. Do not expand a documentation task into a code,
+schema, dependency, migration, deployment, or browser-automation task without
+an explicit request.
 
-- Handle one independently verifiable task at a time; do not implement future requirements early or refactor unrelated code along the way.
-- Reuse existing implementations and patterns first. Without a current acceptance basis, do not introduce new frameworks, infrastructure, or public abstractions.
-- When modifying public contracts, check all call sites, compatibility, migration paths, and rollback risks in sync.
-- For write operations or state changes, specify behavior for: normal case, empty result, invalid input, dependency failure, timeout, retry, duplicate execution, and partial failure.
-- Errors must be locatable; do not swallow exceptions, fake success, or mask failures with vague defaults.
-- Do not make results pass by deleting tests, skipping checks, relaxing assertions, swallowing exceptions, or lowering acceptance criteria.
-- Comments should only explain the reasons, constraints, and trade-offs that the code cannot express on its own.
+## Safety Stop Conditions
 
-## 4. Testing and Acceptance
+Stop and ask the user before proceeding when:
 
-- After completing each independently verifiable unit, immediately run the narrowest relevant tests; if a test fails, locate the root cause before continuing.
-- When adding or changing behavior, add or update tests in the same task, covering at least the happy path and one boundary or failure path directly related to the change.
-- When fixing a bug, first add or locate a failing test that stably reproduces the issue; confirm it fails due to the target defect, then make the minimal fix. If automation is not possible, provide reproducible steps and explain why.
-- Pure documentation or configuration changes with no business logic do not require new unit tests, but must run applicable format, build, config validation, or smoke checks.
-- For UI changes, in addition to automated checks, verify key states on the actual page; perform screenshot comparisons against visual baselines when available.
-- Verification order: target use case → current module tests → related integration tests → lint/typecheck/build → Task Spec acceptance.
-- By default, tests and CI must not call paid, non-repeatable, or real-data-mutating external services; use deterministic substitutes or controlled fixtures.
-- Before delivery, map each acceptance criterion to a test, command output, screenshot, or other observable evidence.
-- Report only the commands and exact results actually run. Checks that were not run, failed, or blocked by the environment must be clearly marked — never claim they passed.
+- the requirement has more than one interpretation that changes behavior,
+  acceptance, a public API, a database Schema, or a technical direction;
+- executable code, Schema, tests, command output, and a document have a
+  substantive conflict that cannot be resolved by the source-of-truth order;
+- the requested work would modify unrelated dirty-worktree changes or expand
+  beyond the four files in the current AI-baseline task;
+- the action would install or upgrade dependencies, run a non-temporary
+  migration, delete or batch-move data/files, rewrite Git history, push,
+  deploy, or call an external service with real or paid data;
+- a file or output may contain credentials, tokens, real sensitive data, or
+  unnecessary raw data. Do not read or print `.env` secrets.
 
-## 5. Review, Git, and Security
+Do not silently resolve these conditions by weakening tests, hiding failures,
+reverting user changes, or inventing a business rule.
 
-- Before delivery, check `git diff --stat`, key diffs, and `git diff --check`; remove debug residue, generated junk, sensitive information, and out-of-scope changes.
-- For changes that meet the "must plan" criteria, perform an independent read-only review before delivery; if the environment does not support an independent reviewer, self-review against the same checklist and note it.
-- After fixing review issues, run targeted regression. If results do not converge after two consecutive rounds, stop expanding changes and reconfirm requirements or design.
-- Do not read, commit, output, or log keys, credentials, real sensitive data, or unnecessary raw data.
-- Obtain explicit user confirmation before installing or upgrading dependencies, executing non-temporary database migrations, deleting data, deleting or batch-moving files, rewriting git history, force-pushing, or deploying.
-- Unless explicitly requested by the user, do not commit, push, create PRs, or deploy. When committing, use a single-purpose, independently verifiable Conventional Commit.
+## Verification Principles
 
-## 6. Documentation and Rule Maintenance
-
-- The Task Spec records the current task; the DEVLOG records only implemented and verified facts; README/ADR records stable usage and technical decisions.
-- When behavior, interfaces, or operational practices change, update the directly related documentation in sync; never write goals, speculations, or un-run results as achievements.
-- The completion report includes: change summary, affected files, key decisions, verification commands and results, unverified items, limitations, and remaining risks.
-- Keep this file short, specific, and non-repetitive. Remove content that can be inferred from the code, outdated rules, and conflicting rules.
-- Rules that must be mechanically enforced with zero exceptions should be encoded in tests, CI, lint, or hooks; `AGENTS.md` describes only team conventions and decision boundaries.
+- Verify the requested behavior first, then the owning module tests, related
+  integration checks, and finally lint/typecheck/build and contract drift. The
+  concrete commands are listed in `docs/ai/project-map.md` and are derived
+  from `Makefile`, package scripts, and CI.
+- For documentation-only changes, no business unit test is required; run the
+  applicable document/diff checks and inspect the final diff for scope and
+  evidence quality.
+- A passing historical entry or a configured CI step is not a result from the
+  current checkout. Report only commands actually run, with their exact result;
+  mark skipped, failed, blocked, or unverified checks explicitly.
+- Preserve the working tree. Before delivery, inspect `git status --short`,
+  `git diff --stat`, the key diff, and `git diff --check`.

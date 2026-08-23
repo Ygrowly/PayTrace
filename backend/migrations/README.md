@@ -1,5 +1,8 @@
-# Alembic Migration 目录（M0a 占位）。
+# Alembic Migration
 
-Alembic 框架与首个 Migration 将在 M0b 引入。按方案 § 10.2，首个
-Migration 会创建 `incidents`、`diagnosis_runs`、`diagnosis_run_events`
-三张表，且**不建立任何 DB 层外键约束**（见 ADR 0003）。
+`versions/` 是控制面 Schema 的变更记录。当前迁移链覆盖 Incident/DiagnosisRun、
+诊断证据与报告、EvaluationRun 以及 ORM/Schema 一致性修复。项目按 ADR 0003
+不建立 DB 层外键，跨表完整性由 Service 层和集成测试维护。
+
+执行迁移会改变数据库状态；本地使用 `uv run alembic upgrade head`，CI 会在
+临时 PostgreSQL 上验证完整迁移链。
