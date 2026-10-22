@@ -20,8 +20,8 @@ BadcaseCategory = Literal[
     "STAGE_FALSE_POSITIVE",  # predicted stage not in GT
     "ROOT_CAUSE_MISS",  # expected root cause absent from prediction
     "ROOT_CAUSE_FALSE_POSITIVE",  # predicted root cause not in GT
-    "UNSUPPORTED_CLAIM",  # report failed evidence-support validation
-    "LOSS_ATTRIBUTION_ERROR",  # |estimated - actual| beyond tolerance
+    "UNSUPPORTED_CLAIM",  # a claim the evidence contract could not carry
+    "LOSS_ATTRIBUTION_ERROR",  # relative loss error beyond tolerance
     "RUN_FAILURE",  # diagnosis run did not succeed
     "DATA_GAP_MISS",  # expected data gap not surfaced in missing_data
 ]
@@ -46,9 +46,10 @@ class ScenarioResult(BaseModel):
     root_cause_precision: float | None = None
     root_cause_recall: float | None = None
     root_cause_f1: float | None = None
-    evidence_validity_rate: float | None = None  # supported evidence / total cited
-    unsupported_claim_rate: float | None = None  # unsupported root causes / total
-    loss_attribution_abs_error: int | None = None  # |estimated lost - GT lost|
+    evidence_validity_rate: float | None = None  # citable evidence / total cited
+    unsupported_claim_rate: float | None = None  # UNKNOWN claims / total claims
+    # |estimated lost - GT fault-attributable lost| / max(GT lost, 1)
+    loss_attribution_rel_error: float | None = None
     tool_call_count: int | None = None
     latency_ms: int | None = None
     report_summary: str | None = None
@@ -56,12 +57,22 @@ class ScenarioResult(BaseModel):
     recommended_actions: list[str] = Field(default_factory=list)
     adapter_name: str | None = None
     model_name: str | None = None
+    # Which evidence-gathering mode ran (B0 fixed pipeline / B2 investigation)
+    # and, for B2, which policy drove it. The report's own adapter provenance
+    # above refers to the writer, not the investigator.
+    agent_mode: str = "B0"
+    policy_name: str | None = None
+    # True when any model step in this scenario fell back to a deterministic
+    # path. A fallback run must never be reported as a successful model run.
     fallback_used: bool = False
     fallback_reason: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     tool_trace: list[dict[str, Any]] = Field(default_factory=list)
+    # Validator codes raised on the published report, so a badcase can be
+    # traced back to the rule that fired rather than only to its symptom.
+    validation_issue_codes: list[str] = Field(default_factory=list)
     badcases: list[BadcaseCategory] = Field(default_factory=list)
 
 
@@ -78,7 +89,9 @@ class AggregateMetrics(BaseModel):
     root_cause_f1_mean: float
     evidence_validity_rate_mean: float
     unsupported_claim_rate_mean: float
-    loss_attribution_mae: float | None = None  # None if no scenario has GT loss
+    # Mean of |relative error| against Ground Truth fault impact, i.e. MAPE.
+    # None only when no scenario produced a scored report.
+    loss_attribution_mape: float | None = None
     tool_call_count_mean: float | None = None
     latency_ms_mean: float | None = None
     badcase_count: int

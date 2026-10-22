@@ -816,3 +816,308 @@ deterministic diagnosis tools, and dataset quality validation.
 - Optionally merge PR #1 once reviewed.
 - Consider a deterministic (CDP/evaluate-based) E2E verifier for the
   detail page to replace the flaky LLM assertion.
+
+---
+
+## 2026-09-12 · M5 · Evidence contract, Diagnostic Harness, and metric correction
+
+### Implemented
+- `backend/app/diagnosis/validator.py` — `classify_support` is now the single
+  implementation of the evidence contract, shared by
+  `resolve_support_status` (code → type resolution) and
+  `_evidence_supports_label`, so R8 (evidence/label mismatch) and R14 (support
+  status) cannot disagree about the same evidence set. New rules
+  `R14_UNSUPPORTED_STATUS` and `R15_UNKNOWN_EXPLAINS_LOSS`; R10's
+  "has real evidence" now excludes negative evidence types.
+- `backend/app/diagnosis/report.py` — `RootCause.support_status`
+  (`SUPPORTED`/`PARTIAL`/`UNKNOWN`), defaulted so old reports still load.
+- `backend/app/diagnosis/orchestrator.py` — `agent_mode` (`B0`/`B2`);
+  `_apply_evidence_contract` downgrades claims the evidence cannot carry, moves
+  their loss from `explained` to `unexplained`, and records the downgrade.
+  `DiagnosisExecution` carries the harness trace (hypotheses, steps, blocked
+  calls, degradations, policy provenance).
+- `backend/app/ontology/registry.py` — `EvidenceType.FUNNEL_BASELINE_STABLE`.
+- `backend/app/tools/diagnostic.py` — the funnel tool emits that negative
+  evidence when no stage degraded, so a "nothing is wrong" conclusion cites a
+  system-computed fact instead of standing alone.
+- `backend/app/harness/routing.py` — `CapabilityBundle` + `route_capabilities`,
+  unioning signals so a mixed incident gets both capability sets.
+- `backend/app/harness/hooks.py` — Before-Tool hooks (capability bundle,
+  incident scope, argument schema, budget, rejected hypotheses, read-only/dedup)
+  and After-Tool hooks (evidence registration, hypothesis resolution, artifact
+  degradation, tool status, early exit). Block on cost/scope; degrade on
+  information loss.
+- `backend/app/harness/ledger.py` — `Hypothesis` / `HypothesisLedger` with
+  `PROPOSED → INVESTIGATING → SUPPORTED/PARTIAL/REJECTED/NEEDS_DATA`, plus
+  `evaluate_hypothesis` and `is_designated_probe` (only the tool that would have
+  found the evidence may rule a hypothesis out).
+- `backend/app/harness/investigation.py` — `InvestigationState`,
+  `ScriptedInvestigationPolicy` (stateless, deterministic), and
+  `OpenAIToolCallingPolicy` (OpenAI tools API, explicit fallback).
+- `backend/app/harness/harness.py` — the governed loop: triage → routing →
+  hypotheses → policy/hook cycle → early exit.
+- `backend/app/tools/schemas.py` — explicit JSON Schemas plus a dependency-free
+  argument validator. `dataset_ref` is deliberately absent: the harness injects
+  it and strips any policy-supplied value.
+- `backend/app/evaluation/` — B2 mode; `loss_attribution_mape` replaces
+  `loss_attribution_mae`; `unsupported_claim_rate` counts claims rather than
+  validation issues; `evidence_validity_rate` also requires the cited evidence
+  to come from a successful tool call; `ScenarioResult` gained `agent_mode`,
+  `policy_name` and `validation_issue_codes`.
+- `backend/app/analytics/duckdb_source.py` — per-transition step-rate loss
+  attribution instead of per-stage overall-rate extrapolation.
+- `backend/app/harness/scenarios/generator.py` — cancellation now caps the
+  funnel position; `GroundTruth.expected_lost_intents` is a true counterfactual
+  (only intents that would have completed count as lost).
+- `backend/migrations/versions/20260912_0006_harness_support_status.py` —
+  `diagnosis_hypotheses` table, `root_cause_findings.support_status`,
+  `diagnosis_runs.agent_mode`. Additive and reversible.
+- Frontend — hypothesis ledger panel and support-status badges on the incident
+  detail page, B2 option and per-scenario policy provenance in Eval Lab.
+
+### Verified
+- Full suite against an isolated `paytrace_test` database:
+  **232 passed, 7 deselected** (the deselected items are the LLM-driven browser
+  E2E tests, which are not a regression gate). Against the dev database:
+  185 passed, 44 skipped.
+- `uv run ruff check .` clean; `uv run ruff format --check .` clean.
+- Frontend: 5 vitest tests, lint, typecheck and production build (5 routes) pass.
+- `make smoke-demo` → `SUCCEEDED`, `mixed_failure`, 6 tool calls, 11 evidence
+  items, 103 lost intents fully explained (CHANNEL_TIMEOUT 39 SUPPORTED,
+  BENEFIT_SELECTION_FRICTION 64 PARTIAL). `model_provider` correctly reported
+  as `harness_scripted_fallback`.
+- Multi-seed (11/42/73) × 7 scenarios × 500 intents, both modes:
+  `stage_localization_exact_rate` 1.0, `root_cause_f1` 1.0,
+  `unsupported_claim_rate` 0.0, `badcase_count` 0,
+  `loss_attribution_mape` 0.0653. Tool calls: B0 6.0 → B2 2.17.
+- B2 latency: 110 ms with no model configured; 5.6 s with a configured but
+  unreachable model (each scenario pays a failed HTTP round trip).
+- Incident detail page rendered under headless Chrome: the hypothesis ledger,
+  support-status badges, B2 chip and fallback chip all present in the DOM.
+- `make gen-openapi` regenerated the contract; frontend typecheck passes with no
+  drift.
+
+### Deviations
+- The configured model endpoint (`MODEL_BASE_URL` in `.env`) returns
+  `401 invalid_api_key`. **No successful real-model investigation was observed
+  on this checkout.** Every B1/B2 model path exercised the documented fallback,
+  which is why the fallback provenance is reported separately from model
+  invocations. Verifying the model path needs a valid key.
+- The plan scoped B2's model policy as the primary path. In practice the
+  deterministic policy is what ran everywhere, so it is what the tests and the
+  reported numbers cover. The model policy itself is covered only by its
+  fallback behaviour.
+- Fixing the metric definitions surfaced defects the plan did not anticipate
+  (cross-stage double counting, benefit friction being invisible to the funnel,
+  the rule adapter attributing zero loss to the benefit claim, and Ground Truth
+  over-counting loss). Each was fixed at the root rather than worked around,
+  which is why the measured numbers in this entry differ from the plan's
+  expectations.
+- `docs/measured-results.md` was added as the single place where numbers live,
+  including the ones that are unflattering (F1 = 1.0 has no discriminating
+  power at seven scenarios).
+
+### Risks
+- **`root_cause_f1 = 1.0` is not evidence of quality.** Seven scenario kinds
+  each have a dedicated rule, so the rule adapter matches the generator by
+  construction. This is stated in the README and the measured-results doc, but
+  it remains the easiest number to misread.
+- **Loss-attribution accuracy is scale-dependent** (MAPE ≈ 10% at 500 intents,
+  ≈ 4% at 5000). Any published figure must state the intent count.
+- **Ground Truth isolation is still a module convention.** There is no runtime
+  leak detector; adding an import to the diagnosis path would break it silently.
+- **The human review loop is entirely absent** (no accept/reject/modify, no
+  disposition record, no recovery monitoring). Documented as missing rather than
+  implied.
+- Full Compose image build remains unverified locally (Docker Hub unreachable).
+
+### Next
+- Replace the invalid model key and run one real B2 investigation; record the
+  model name, token usage and whether it fell back.
+- Consider a runtime Ground Truth access guard, since the module boundary is the
+  only thing holding it.
+- Implement the human review loop before claiming the closed loop is complete.
+
+---
+
+## 2026-09-12 · M5 (frontend) · Evidence-ledger workbench
+
+### Implemented
+- Design tokens in `frontend/app/globals.css` (`@theme`): paper/ink/rule neutrals,
+  a petrol accent for actions, and three state colours carrying the evidence
+  contract (`settled`/`partial`/`open`). `alarm` is reserved for genuine failure
+  so a weak claim never reads as an error.
+- Typography via `next/font` (self-hosted at build time, no runtime font
+  requests): Archivo for display, IBM Plex Sans for prose, IBM Plex Mono for
+  every figure, id and label — with tabular numerals throughout, because the
+  numbers are the product.
+- **The loss statement** (`components/ledger/statement.tsx`) leads the incident
+  page: a balance of attributed claims plus an honest unattributed remainder
+  against the total, with the completion-rate move beside it.
+- **The funnel ladder** (`components/ledger/funnel-ladder.tsx`) replaces the
+  grouped bar chart. One row per transition: baseline step rate as a tick,
+  incident step rate as a bar, and the gap between them drawn as the loss. A
+  grouped chart hides an 8-point drop at 60% bar length; a gap reads as a gap.
+- **The evidence trace rail** (`components/ledger/trace.tsx`) — the signature
+  interaction. Selecting any figure walks a graph derived from the page's own
+  data and lights the whole chain at once: the claim, its funnel stage, the
+  hypothesis that was tested, the tool call, and the evidence records. Everything
+  unrelated dims. Verified with a real click (see below).
+- **The investigation spine** (`components/ledger/spine.tsx`): signals detected,
+  tools allowed vs calls made, stop reason, blocked calls, degraded reads, and
+  each hypothesis with the tool that tested it.
+- Page order rewritten to the order a reader needs: loss → stage → investigation
+  → claims → evidence. Previously the hypothesis ledger sat below the tool trace.
+- New incident fields `latest_lost_intents` / `latest_root_causes` so the list
+  shows what the system concluded, not only that it ran.
+- New `FunnelStageDelta.baseline_step_rate` / `incident_step_rate`, so the UI
+  shows the quantity the system actually reasons about rather than the
+  overall rate, which is diluted by upstream attrition.
+
+### Verified
+- Backend: 234 passed, 7 deselected on the isolated `paytrace_test` database;
+  ruff check and format clean.
+- Frontend: 5 vitest tests, lint, typecheck and production build (5 routes) pass.
+- Trace rail, driven by a real click through Chrome DevTools Protocol
+  (`scripts/trace_rail_probe.py`): before the click 0 elements pressed and 0
+  dimmed; after selecting CHANNEL TIMEOUT exactly 1 element is pressed and the
+  unrelated panels dim. The same probe at `--viewport 390` reports
+  `scrollWidth == clientWidth == 390` and zero overflowing elements on all four
+  pages.
+- Screenshots of all four pages reviewed, at 1440px and at an emulated 390px.
+
+### Deviations
+- The plan listed the workbench as the last milestone; it was done as a distinct
+  pass with its own DEVLOG entry because it changed the visual language rather
+  than extending the existing one.
+- **`echarts` is now an unused dependency.** The funnel ladder and the evaluation
+  metrics are both hand-built: a grouped bar chart cannot show a step-rate gap,
+  and five near-1.0 bars communicate nothing. Removing the dependency is a
+  package.json change, so it is left in place and flagged here instead.
+- Two real defects surfaced while building the UI, both fixed at the root rather
+  than worked around:
+  1. The funnel charged loss at *every* transition with a positive shortfall,
+     including sampling noise, so the ladder's total (120) disagreed with the
+     report's (103) on the same page. Loss is now charged only at transitions
+     the system flags as degraded — one condition, one `is_anomalous` local, so
+     the two can never diverge again.
+  2. The benefit-friction claim cited the *channel* stage degradation, and the
+     channel claim cited nothing from its own stage: the adapter handed every
+     stage-degradation record to every claim. Each claim now cites only the
+     stages its own loss rests on, which is also what makes the trace rail's
+     claim→stage link meaningful rather than arbitrary.
+
+### Risks
+- The trace rail's graph is derived from `metrics.stage` on funnel evidence. A
+  future evidence type that localizes a stage differently would silently produce
+  an unlinked row rather than an error.
+- `root_cause_f1 = 1.0` is still displayed on the Eval Lab. The row carries the
+  caveat inline ("seven scenarios with one dedicated rule each — not a
+  generalisation measure"), but it remains the easiest number to misread.
+- The `next/font` build step fetches from Google Fonts. The fonts are cached in
+  `.next`, but a first build on an offline machine will fail.
+
+### Next
+- Remove `echarts` from `package.json` (needs a dependency change sign-off).
+- Consider a deterministic CDP assertion in CI for the trace rail, since the
+  probe already reports pass/fail.
+
+---
+
+## 2026-09-13 · M5 · Review pass: CI regression, accessibility, and doc drift
+
+A full review of the working tree, run against the live stack rather than read
+off the docs. It found one regression that would have failed CI, plus a set of
+smaller drift items. Everything below was fixed unless marked otherwise.
+
+### Implemented
+- `backend/tests/e2e/test_deterministic.py` — the public-workbench check now
+  asserts on what each page must *do* rather than on its panel titles: the home
+  page must report all three backing services, the incidents page must offer the
+  create control and open its dialog, and the Eval Lab must offer all three
+  modes. Panel headings churn whenever the UI is reworked; the services,
+  controls and modes are the actual subject.
+- `frontend/app/page.tsx` — the runtime panel renders the dependency status as a
+  word, not only as a coloured dot, and surfaces the dependency's `detail` when
+  it is not ok.
+- `frontend/components/ledger/trace.test.tsx` — five tests over the trace rail:
+  nothing dims before a selection; selecting a claim lights exactly its evidence,
+  tool, hypothesis and stage while the other chain stays dim; the walk works in
+  both directions from an evidence record; the selection is exclusive and clears
+  on a second click; a degraded stage no claim cites is still selectable.
+- `docs/api.md` — documents B2, the hypothesis ledger on the trace response, the
+  `harness_routed` and terminal run-event payloads, `support_status`,
+  `agent_mode`, `latest_lost_intents` / `latest_root_causes`, and the funnel's
+  step rates.
+- `.env.example` — adds `API_HOST`, `API_PORT`, `SCENARIO_ROOT`, `ARTIFACT_ROOT`,
+  which existed in `Settings` but were undiscoverable from the template.
+- Removed the unused `Figure` export from `components/page-elements.tsx`.
+- `README.md` — records that M0–M4 come from the plan document and that M5 is
+  post-plan, recorded in this file only. The plan document is deliberately left
+  as the historical plan rather than back-filled.
+
+### Verified
+- `pytest tests/e2e/test_deterministic.py -m deterministic_e2e -o "addopts=" -v`
+  → **2 passed**. Before the assertion fix this was 1 failed / 1 passed, which
+  means CI would have been red.
+- Frontend: 10 vitest tests (5 eval + 5 trace rail), lint with
+  `--max-warnings=0`, typecheck and production build all pass.
+- Backend: 234 passed, 7 deselected on the isolated test database; ruff check and
+  format clean.
+- Multi-seed matrices re-run against the current code: every published metric in
+  `docs/measured-results.md` still holds (`stage_localization_exact_rate` 1.0,
+  `root_cause_f1` 1.0, `unsupported_claim_rate` 0.0, `loss_attribution_mape`
+  0.0653, badcases 0, B2 tool calls 2.17 vs B0 6.0). Only the latency figures
+  drifted, which is expected for wall-clock measurements and is now stated in
+  the document.
+- OpenAPI: regenerating the contract produces a zero-length diff, so there is no
+  schema drift.
+- Home page DOM contains `postgres ok`, `redis ok`, `minio ok` — the text status
+  is actually rendered, not just the dot colour.
+
+### Deviations
+- The regression was introduced by the workbench rewrite in the previous entry
+  and went unnoticed because the default local `pytest` invocation deselects
+  `tests/e2e/`; only CI's deterministic smoke job runs it. The lesson is
+  recorded rather than the test broadened: a UI-copy coupling in a browser test
+  is a test-design problem, so the assertions were rewritten to be
+  copy-independent instead of merely updated.
+- `frontend/tests/` holds a `.gitkeep` from the M0a skeleton and is intentionally
+  empty; it was left alone after checking, rather than "tidied" away.
+
+### Environment finding: port 8000 is contested on this machine
+`rulearena-control-api-1` (a different project's container) publishes
+`0.0.0.0:8000` **and** `[::]:8000`, alongside PayTrace's uvicorn on
+`127.0.0.1:8000`. Node and Chrome resolve `localhost` to `::1` on this host, so
+every request dialling `http://localhost:8000` reached the rulearena API and got
+its 404 — the home page rendered "the backend did not answer" and the incident
+page rendered "Failed to fetch", while `curl 127.0.0.1:8000` was perfectly
+healthy. The port was free when this session started; the container came up
+during it.
+
+That is why the deterministic e2e briefly failed after passing earlier. Fixed
+rather than worked around: the frontend's `DEFAULT_API_BASE`,
+`.env.example`'s `NEXT_PUBLIC_PAYTRACE_API_BASE` and the e2e conftest's
+`E2E_API_URL` default all now say `127.0.0.1`, since the API binds IPv4 and
+nothing of ours ever listens on `::1`. A refused connection is a better failure
+than a wrong host that answers.
+
+The same bug had a second copy: `app/page.tsx` carried its own
+`process.env.PAYTRACE_API_BASE ?? "http://localhost:8000"`, which is what the
+server-rendered home page used. It now calls the same `apiUrl()` resolver as the
+browser, so the two halves cannot drift apart again. Neither `.env` nor
+`.env.example` previously set that variable, so both halves were falling through
+to their own hardcoded default — two places to get wrong, and both were.
+
+### Risks
+- The trace-rail tests cover the graph traversal against hand-written fixtures.
+  They will not notice a real API payload whose shape differs from what the page
+  expects; only the manual CDP probe exercises the live wiring.
+- `root_cause_f1 = 1.0` still appears on the Eval Lab. The inline caveat is
+  present but the number remains easy to misread.
+
+### Next
+- Commit the working tree; it currently holds the M5 backend, frontend and
+  review work as one uncommitted set.
+- Replace the invalid model key and run one real B2 investigation.
+- Remove `echarts` from `package.json` (needs a dependency-change sign-off).

@@ -62,6 +62,18 @@ class SimulatedIncidentCreate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
 
 
+class IncidentRootCauseSummary(BaseModel):
+    """The headline of one claim, for list views.
+
+    The full claim (explanation, citations, alternatives) lives in the report;
+    this is only what a reader needs to tell two incidents apart at a glance.
+    """
+
+    label: str
+    support_status: Literal["SUPPORTED", "PARTIAL", "UNKNOWN"]
+    estimated_lost_intents: int | None
+
+
 class IncidentResponse(BaseModel):
     """GET /incidents, GET /incidents/{id} response."""
 
@@ -85,6 +97,10 @@ class IncidentResponse(BaseModel):
     updated_at: datetime
     latest_diagnosis_run_id: UUID | None = None
     latest_diagnosis_status: str | None = None
+    # Populated from the latest report so a list row can show what the system
+    # concluded, not only that it ran. Empty until a report exists.
+    latest_lost_intents: int | None = None
+    latest_root_causes: list[IncidentRootCauseSummary] = Field(default_factory=list)
 
 
 class IncidentListResponse(BaseModel):
@@ -110,6 +126,8 @@ class DiagnosisRunResponse(BaseModel):
     model_name: str | None
     prompt_version: str | None
     ontology_version: str | None
+    # B0 fixed pipeline / B2 governed investigation. Null on legacy runs.
+    agent_mode: str | None = None
     attempt_number: int
     celery_task_id: str | None
     started_at: datetime | None
@@ -154,6 +172,7 @@ class RootCauseSchema(BaseModel):
     explanation: str
     evidence_codes: list[str]
     rank: int
+    support_status: Literal["SUPPORTED", "PARTIAL", "UNKNOWN"] = "SUPPORTED"
 
 
 class ReportResponse(BaseModel):
@@ -216,11 +235,31 @@ class EvidenceResponse(BaseModel):
     created_at: datetime
 
 
+class HypothesisSchema(BaseModel):
+    """One node of a B2 run's investigation ledger (notes § 8.5)."""
+
+    model_config = {"from_attributes": True}
+
+    hypothesis_id: str
+    root_cause_type: str
+    proposed_scope: dict | None
+    # Nullable: a stored NULL is "nothing recorded", which for these lists is
+    # the same as empty, and the column is JSONB rather than an array type.
+    supporting_evidence: list[str] | None
+    conflicting_evidence: list[str] | None
+    alternative_explanations: list[str] | None
+    required_next_tool: str | None
+    status: str
+    rejection_reason: str | None
+    created_at: datetime
+
+
 class DiagnosisTraceResponse(BaseModel):
     diagnosis_run_id: UUID
     events: list[DiagnosisRunEventSchema]
     tool_executions: list[ToolExecutionSchema]
     evidence: list[EvidenceResponse]
+    hypotheses: list[HypothesisSchema] = Field(default_factory=list)
 
 
 class ArtifactDownloadResponse(BaseModel):

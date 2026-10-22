@@ -15,9 +15,21 @@ from app.diagnosis.prompts import (
     PROMPT_VERSION,
 )
 from app.diagnosis.report import DiagnosisReport, RootCause
+from app.diagnosis.validator import resolve_support_status
 from app.ontology.registry import EvidenceType
 
 logger = logging.getLogger(__name__)
+
+# Funnel stages whose degradation is caused by the payment channel, and by
+# payment-decision friction. The first stage in each family carries the loss;
+# later stages show the same intents still missing, so summing them would
+# double-count.
+_CHANNEL_FAULT_STAGES: tuple[str, ...] = ("CHANNEL_SUCCEEDED",)
+_FRICTION_STAGES: tuple[str, ...] = (
+    "PAYMENT_OPTIONS_SHOWN",
+    "PAYMENT_METHOD_SELECTED",
+    "PAYMENT_INITIATED",
+)
 
 
 class RuleBasedModelAdapter:
@@ -73,11 +85,22 @@ class RuleBasedModelAdapter:
         root_causes: list[RootCause] = []
         explained = 0
 
-        # Estimate lost intents per evidence type from matching stage/dimension evidence.
-        timeout_lost = _estimate_lost_for_evidence(
+        # Attribute the loss localized at each family of funnel stages to the
+        # root cause that would cause it. Without this, a claim can be raised
+        # with a confident label while accounting for none of the loss — which
+        # is how a fully-diagnosed incident ends up reporting 0 explained and
+        # everything unexplained.
+        channel_stage_lost = _lost_at_stages(ctx, _CHANNEL_FAULT_STAGES)
+        friction_stage_lost = _lost_at_stages(ctx, _FRICTION_STAGES)
+
+        # Fall back to the evidence's own metric when no stage degradation was
+        # localized (e.g. only dimension evidence was produced).
+        timeout_lost = channel_stage_lost or _estimate_lost_for_evidence(
             ctx, (EvidenceType.CHANNEL_TIMEOUT, EvidenceType.DIMENSION_CONTRIBUTION)
         )
-        benefit_lost = _estimate_lost_for_evidence(ctx, (EvidenceType.BENEFIT_GAP_FRICTION,))
+        benefit_lost = friction_stage_lost or _estimate_lost_for_evidence(
+            ctx, (EvidenceType.BENEFIT_GAP_FRICTION, EvidenceType.CANCEL_REORDER_FLOW)
+        )
 
         # Rule 2–4: build root causes from evidence
         timeout_codes = _evidence_codes_for(ctx, EvidenceType.CHANNEL_TIMEOUT)
@@ -86,10 +109,18 @@ class RuleBasedModelAdapter:
         dim_codes = _evidence_codes_for(ctx, EvidenceType.DIMENSION_CONTRIBUTION)
         error_codes = _evidence_codes_for(ctx, EvidenceType.ERROR_CODE_CONCENTRATION)
 
+        # Each claim cites only the stage degradation its own loss rests on.
+        # Handing every degradation record to every claim would attribute the
+        # channel's drop to the friction claim and vice versa — citations that
+        # point at the other root cause's evidence.
+        channel_stage_codes = _stage_codes_for(ctx, _CHANNEL_FAULT_STAGES)
+        friction_stage_codes = _stage_codes_for(ctx, _FRICTION_STAGES)
+
         rank = 1
 
         if has_timeout_ev:
             rc_lost = min(timeout_lost, total_lost) if total_lost > 0 else timeout_lost
+            codes = timeout_codes + channel_stage_codes + dim_codes
             root_causes.append(
                 RootCause(
                     label="CHANNEL_TIMEOUT",
@@ -100,8 +131,9 @@ class RuleBasedModelAdapter:
                         f"Channel timeout evidence with {timeout_lost} estimated lost intents "
                         f"in payment channel timeouts."
                     ),
-                    evidence_codes=timeout_codes + dim_codes,
+                    evidence_codes=codes,
                     rank=rank,
+                    support_status=_support_status_for(ctx, "CHANNEL_TIMEOUT", codes),
                 )
             )
             explained += rc_lost
@@ -109,6 +141,7 @@ class RuleBasedModelAdapter:
 
         if has_benefit_ev:
             rc_lost = min(benefit_lost, total_lost) if total_lost > 0 else benefit_lost
+            codes = benefit_codes + friction_stage_codes
             root_causes.append(
                 RootCause(
                     label="BENEFIT_SELECTION_FRICTION",
@@ -120,8 +153,9 @@ class RuleBasedModelAdapter:
                         f"selection issue with {benefit_lost} estimated lost intents. "
                         f"(Observational friction evidence, not sole causal proof.)"
                     ),
-                    evidence_codes=benefit_codes + stage_codes,
+                    evidence_codes=codes,
                     rank=rank,
+                    support_status=_support_status_for(ctx, "BENEFIT_SELECTION_FRICTION", codes),
                 )
             )
             explained += rc_lost
@@ -143,12 +177,16 @@ class RuleBasedModelAdapter:
                     ),
                     evidence_codes=all_codes,
                     rank=1,
+                    support_status=_support_status_for(ctx, "UNKNOWN", all_codes),
                 )
             )
             explained = total_lost
 
         if not root_causes:
-            # Rule 6: no significant evidence — normal
+            # Rule 6: no significant evidence — normal.
+            # Bind the negative funnel evidence so the "no anomaly" conclusion is
+            # still traceable to a system-computed fact instead of standing alone.
+            stable_codes = _evidence_codes_for(ctx, EvidenceType.FUNNEL_BASELINE_STABLE)
             root_causes.append(
                 RootCause(
                     label="NORMAL_PAYMENT_FAILURE",
@@ -156,8 +194,9 @@ class RuleBasedModelAdapter:
                     confidence="LOW",
                     estimated_lost_intents=0,
                     explanation="No significant evidence of a payment anomaly detected.",
-                    evidence_codes=[],
+                    evidence_codes=stable_codes,
                     rank=1,
+                    support_status=_support_status_for(ctx, "NORMAL_PAYMENT_FAILURE", stable_codes),
                 )
             )
 
@@ -188,6 +227,16 @@ def _evidence_codes_for(ctx: DiagnosisContext, ev_type: EvidenceType) -> list[st
     return [e.evidence_code for e in ctx.evidence_list if e.evidence_type == ev_type]
 
 
+def _support_status_for(ctx: DiagnosisContext, label: str, evidence_codes: list[str]) -> str:
+    """Assign the claim's support status from the evidence actually available.
+
+    Uses the same contract the validator enforces, so the adapter does not
+    produce claims the orchestrator would immediately have to downgrade.
+    """
+    run_evidence = {e.evidence_code: e for e in ctx.evidence_list}
+    return resolve_support_status(label, evidence_codes, run_evidence)[0]
+
+
 def _estimate_lost_for_evidence(ctx: DiagnosisContext, ev_types: tuple[EvidenceType, ...]) -> int:
     """Sum estimated_lost_intents from matching evidence types and related dimension evidence."""
     total = 0
@@ -195,6 +244,28 @@ def _estimate_lost_for_evidence(ctx: DiagnosisContext, ev_types: tuple[EvidenceT
         if ev.evidence_type in ev_types:
             total += ev.metrics.get("estimated_lost_intents", 0)
     return total
+
+
+def _lost_at_stages(ctx: DiagnosisContext, stages: tuple[str, ...]) -> int:
+    """Loss the funnel localized at the first degraded stage of a family."""
+    for stage in stages:
+        for ev in ctx.evidence_list:
+            if (
+                ev.evidence_type == EvidenceType.FUNNEL_STAGE_DEGRADATION
+                and ev.metrics.get("stage") == stage
+            ):
+                return int(ev.metrics.get("estimated_lost_intents", 0))
+    return 0
+
+
+def _stage_codes_for(ctx: DiagnosisContext, stages: tuple[str, ...]) -> list[str]:
+    """Evidence codes for the degraded stages belonging to one fault family."""
+    return [
+        ev.evidence_code
+        for ev in ctx.evidence_list
+        if ev.evidence_type == EvidenceType.FUNNEL_STAGE_DEGRADATION
+        and ev.metrics.get("stage") in stages
+    ]
 
 
 def _build_summary(root_causes: list[RootCause], total: int, unexplained: int) -> str:
@@ -297,6 +368,10 @@ _REPORT_SCHEMA_JSON = json.dumps(
                         },
                         "rank": {"type": "integer", "minimum": 1},
                         "alternative_explanation": {"type": ["string", "null"]},
+                        "support_status": {
+                            "type": "string",
+                            "enum": ["SUPPORTED", "PARTIAL", "UNKNOWN"],
+                        },
                     },
                     "required": [
                         "label",
@@ -305,6 +380,7 @@ _REPORT_SCHEMA_JSON = json.dumps(
                         "explanation",
                         "evidence_codes",
                         "rank",
+                        "support_status",
                     ],
                 },
             },
@@ -408,6 +484,10 @@ class OpenAICompatibleModelAdapter:
                 evidence_codes=rc.get("evidence_codes", []),
                 rank=rc.get("rank", i + 1),
                 alternative_explanation=rc.get("alternative_explanation"),
+                # Advisory only: the orchestrator recomputes every claim's
+                # status from the evidence contract, so a model cannot declare
+                # its own claim SUPPORTED.
+                support_status=rc.get("support_status", "UNKNOWN"),
             )
             for i, rc in enumerate(data.get("root_causes", []))
         ]

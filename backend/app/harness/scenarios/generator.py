@@ -88,6 +88,9 @@ class _IntentState:
     switched_method: bool = False
     timed_out: bool = False
     reached_stage: FunnelStage = FunnelStage.ORDER_CONFIRMED
+    # Where the intent would have ended without the injected fault. Captured
+    # before the fault caps are applied, so it is the true counterfactual.
+    would_have_completed: bool = False
     latency_ms: int | None = None
     error_code: str | None = None
 
@@ -207,11 +210,24 @@ def _walk_funnel(rng: random.Random, state: _IntentState, reach: dict[FunnelStag
         if rng.random() >= reach[stage]:
             break
         state.reached_stage = stage
+    # Snapshot the fault-free outcome before any cap is applied. Only intents
+    # that would have completed represent a loss the fault actually caused;
+    # counting every timed-out intent would charge the fault for drop-outs that
+    # were going to happen anyway.
+    state.would_have_completed = state.reached_stage == FunnelStage.PAYMENT_COMPLETED
     if state.timed_out and FUNNEL_STAGE_ORDER.index(
         state.reached_stage
     ) >= FUNNEL_STAGE_ORDER.index(FunnelStage.CHANNEL_SUCCEEDED):
         # A timed-out intent cannot pass channel stage.
         state.reached_stage = FunnelStage.AUTHENTICATION_PASSED
+    # A cancelled intent that was never reordered leaves the flow where the
+    # friction occurred. Without this the cancellation flag affects no funnel
+    # stage, so benefit friction would be invisible to every funnel-based tool
+    # and its loss could not be attributed at all.
+    if state.cancelled and not state.reordered:
+        cap = FUNNEL_STAGE_ORDER.index(FunnelStage.PAYMENT_METHOD_SELECTED)
+        if FUNNEL_STAGE_ORDER.index(state.reached_stage) > cap:
+            state.reached_stage = FunnelStage.PAYMENT_METHOD_SELECTED
 
 
 def _emit_events(
@@ -317,11 +333,20 @@ def _params_for(kind: ScenarioKind, period: Period) -> InjectedParameters:
 
 
 def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
+    """Expected diagnosis for a scenario.
+
+    Stage labels follow the funnel's own convention: loss is attributed to the
+    stage an intent *failed to reach*, not the stage it stopped at. A user who
+    abandons at method selection never reaches PAYMENT_INITIATED, so benefit
+    friction surfaces as a PAYMENT_INITIATED degradation. This matches the
+    channel-timeout case, where a timed-out intent is reported at
+    CHANNEL_SUCCEEDED.
+    """
     kind = cfg.kind
     if kind == "benefit_friction":
         return GroundTruth(
             scenario_id=kind,
-            expected_anomalous_stages=[FunnelStage.PAYMENT_METHOD_SELECTED.value],
+            expected_anomalous_stages=[FunnelStage.PAYMENT_INITIATED.value],
             expected_root_causes=["BENEFIT_SELECTION_FRICTION"],
             affected_dimensions={"payment_method": _PAYMENT_METHODS},
             injected_parameters=_params_for(kind, Period.INCIDENT),
@@ -344,7 +369,7 @@ def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
         return GroundTruth(
             scenario_id=kind,
             expected_anomalous_stages=[
-                FunnelStage.PAYMENT_METHOD_SELECTED.value,
+                FunnelStage.PAYMENT_INITIATED.value,
                 FunnelStage.CHANNEL_SUCCEEDED.value,
             ],
             expected_root_causes=["BENEFIT_SELECTION_FRICTION", "CHANNEL_TIMEOUT"],
@@ -406,9 +431,24 @@ def _ground_truth_for(cfg: ScenarioConfig) -> GroundTruth:
     )
 
 
+def _fault_removed_completion(state: _IntentState) -> bool:
+    """Whether the injected fault took this intent out of the completed set.
+
+    Only counts an intent that would have completed without the fault — an
+    intent that was going to drop out anyway is not a loss the fault caused.
+    Counted per intent, so one that both timed out and cancelled counts once.
+    """
+    if not state.would_have_completed:
+        return False
+    if state.timed_out:
+        return True
+    return state.cancelled and not state.reordered
+
+
 def generate_scenario(cfg: ScenarioConfig) -> tuple[list[CanonicalPaymentEvent], GroundTruth]:
     """Generate all events + ground truth for one scenario. Deterministic."""
     events: list[CanonicalPaymentEvent] = []
+    fault_lost = 0
     for period in (Period.BASELINE, Period.INCIDENT):
         rng = random.Random(_stable_seed(cfg.kind, cfg.seed, period))  # noqa: S311 - deterministic simulation, not crypto
         params = _params_for(cfg.kind, period)
@@ -423,9 +463,13 @@ def generate_scenario(cfg: ScenarioConfig) -> tuple[list[CanonicalPaymentEvent],
                 if params.null_benefit_id_rate and rng.random() < params.null_benefit_id_rate:
                     state.benefit_id = None
             _walk_funnel(rng, state, _BASELINE_REACH)
+            # Counted after the walk: the counterfactual outcome is only known
+            # once the fault-free funnel position has been observed.
+            if period == Period.INCIDENT and _fault_removed_completion(state):
+                fault_lost += 1
             events.extend(_emit_events(state, cfg.kind, drop_stages))
     gt = _ground_truth_for(cfg)
-    return events, gt
+    return events, gt.model_copy(update={"expected_lost_intents": fault_lost})
 
 
 def generate_config_changes(kind: str, seed: int, start_time: datetime | None = None) -> list[dict]:

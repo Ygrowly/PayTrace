@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import get_settings
 from app.db.models import (
     ArtifactRecord,
+    DiagnosisHypothesis,
     DiagnosisReportRecord,
     DiagnosisRun,
     DiagnosisRunEvent,
@@ -86,6 +87,7 @@ def pytest_collection_modifyitems(config, items) -> None:  # noqa: ANN001, ARG00
 
 # Tables in deletion order (children first, though ADR 0003 means no FKs).
 _CLEANUP_TABLES = (
+    DiagnosisHypothesis,
     RootCauseFinding,
     DiagnosisReportRecord,
     DiagnosisRunEvent,

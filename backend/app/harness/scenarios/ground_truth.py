@@ -41,6 +41,11 @@ class GroundTruth(BaseModel):
     generator_version: str = GENERATOR_VERSION
     random_seed: int
     created_at: datetime
+    expected_lost_intents: int = 0
+    """Purchase intents in the incident window that the injected fault removed
+    from the completed set. Zero for clean and data-gap scenarios — it measures
+    fault impact, not observed conversion change, so it can be compared against
+    a report's ``total_estimated_lost_intents``."""
 
     model_config = {"frozen": True}
 

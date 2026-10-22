@@ -1,26 +1,43 @@
-"""DiagnosisOrchestrator — fixed 6-tool workflow (plan § 14.1).
+"""DiagnosisOrchestrator — the diagnosis pipeline (plan § 14.1).
 
-Ties together DuckDBAnalyticsSource, ToolRegistry, EvidenceLedger,
-ContextBuilder, ModelAdapter, ReportValidator, and one correction retry
-into a single synchronous pipeline.
+Two evidence-gathering modes feed the *same* report step, so they can be
+compared with everything downstream held constant:
 
-No Celery, no DB persistence, no SSE — those are M2b/M2c concerns.
+* ``B0`` — the fixed six-tool workflow.
+* ``B2`` — the governed Diagnostic Harness, where a policy decides which tool
+  to call next under a routed capability bundle, a budget, and a hypothesis
+  ledger.
+
+Either way the flow continues through ContextBuilder → ModelAdapter →
+ReportValidator.
+
+No Celery, no DB persistence, no SSE — those are the task/API layers' concerns.
 """
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 from app.analytics.base import PaymentAnalyticsSource
 from app.diagnosis.adapter import RuleBasedModelAdapter
 from app.diagnosis.context import ContextBuilder
 from app.diagnosis.model import DiagnosisContext, ModelAdapter
-from app.diagnosis.report import DiagnosisReport
-from app.diagnosis.validator import ReportValidator, ValidationIssue
+from app.diagnosis.report import DiagnosisReport, RootCause
+from app.diagnosis.validator import ReportValidator, ValidationIssue, resolve_support_status
 from app.harness.artifact_store import ArtifactStore
+from app.harness.harness import DEFAULT_MAX_TOOL_CALLS, DiagnosticHarness
+from app.harness.investigation import InvestigationPolicy
+from app.harness.ledger import Hypothesis
 from app.tools.base import EvidenceLedger, ToolPolicy, ToolRegistry, ToolResult
 from app.tools.diagnostic import build_default_tools
 
+AgentMode = Literal["B0", "B2"]
+
 _DEFAULT_DIMENSIONS = ("payment_channel", "payment_method")
+
+# Issues that make a report unpublishable. Everything else is either corrected
+# by the evidence contract above or returned as an advisory warning.
+_BLOCKING_CODES = frozenset({"R12_SCHEMA_VERSION", "R3_NO_EVIDENCE"})
 
 
 class OrchestratorFailure(Exception):
@@ -35,24 +52,42 @@ class DiagnosisExecution:
     M2 callers. M3 consumers use this richer result so scoring and the UI can
     inspect system-produced evidence and tool timings without re-running the
     diagnostic workflow or putting business calculations in the frontend.
+
+    The harness fields stay empty for B0, where no investigation loop ran.
     """
 
     report: DiagnosisReport
     ledger: EvidenceLedger
     tool_results: tuple[ToolResult, ...]
     validation_issues: tuple[ValidationIssue, ...]
+    agent_mode: AgentMode = "B0"
+    hypotheses: tuple[Hypothesis, ...] = ()
+    steps: tuple[dict[str, Any], ...] = ()
+    blocked_calls: tuple[dict[str, Any], ...] = ()
+    degradations: tuple[str, ...] = ()
+    early_exit_reason: str | None = None
+    incident_scope: dict[str, Any] = field(default_factory=dict)
+    capability_bundle: dict[str, Any] = field(default_factory=dict)
+    # Which investigation policy ran, and whether it reached a model at all.
+    # Kept separate from the report's own adapter provenance: B2's report is
+    # written by the rule adapter even when the investigation used a model.
+    policy_name: str | None = None
+    # The model the policy was configured to use — what was *requested*, which
+    # policy_fallback_used tells you whether it was actually reached.
+    policy_model_name: str | None = None
+    policy_fallback_used: bool = False
+    policy_fallback_reason: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class DiagnosisOrchestrator:
-    """Fixed workflow orchestrator for the diagnosis pipeline.
+    """Runs the diagnosis pipeline in B0 (fixed workflow) or B2 (harness) mode.
 
-    Workflow (plan § 14.1):
+    Workflow (plan § 14.1), shared by both modes:
 
     1. Validate dataset → data quality checks
-    2. Execute fixed tool pipeline:
-       get_payment_funnel → analyze_benefit_gap → inspect_payment_events
-       → trace_cancel_and_reorder → get_config_changes
-       → breakdown_conversion_loss (if anomalous stages detected)
+    2. Gather evidence — fixed tool pipeline (B0) or governed investigation (B2)
     3. Evidence Ledger → Context Builder
     4. Model Adapter → Report Validator → one correction retry
     """
@@ -66,6 +101,9 @@ class DiagnosisOrchestrator:
         dimensions: tuple[str, ...] = _DEFAULT_DIMENSIONS,
         max_retries: int = 1,
         evidence_code_prefix: str = "",
+        agent_mode: AgentMode = "B0",
+        investigation_policy: InvestigationPolicy | None = None,
+        max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
     ) -> None:
         self._source = source
         self._artifacts = artifacts
@@ -74,6 +112,9 @@ class DiagnosisOrchestrator:
         self._dimensions = dimensions
         self._max_retries = max_retries
         self._evidence_code_prefix = evidence_code_prefix
+        self._agent_mode: AgentMode = agent_mode
+        self._investigation_policy = investigation_policy
+        self._max_tool_calls = max_tool_calls
 
     # ------------------------------------------------------------------
     # Public entry point
@@ -112,19 +153,30 @@ class DiagnosisOrchestrator:
     ) -> DiagnosisExecution:
         """Run diagnosis and retain evidence, tool results, and validation.
 
-        The additional trace is produced by the same fixed workflow as
-        :meth:`run`; it is not a second or evaluation-only diagnostic path.
+        The evidence-gathering step depends on ``agent_mode``; everything after
+        it — context building, report generation, validation — is identical, so
+        B0 and B2 differ only in how the evidence was collected.
         """
         iid = incident_id or f"inc-{uuid.uuid4().hex[:12]}"
         rid = diagnosis_run_id or f"run-{uuid.uuid4().hex[:12]}"
 
-        # Step 1: validate dataset
-        missing_data, _ = self._validate_dataset(dataset_ref)
-
-        # Step 2: execute tool pipeline
-        ledger, anomalous_stages, funnel_summary, tool_results = self._run_tool_pipeline(
-            dataset_ref
-        )
+        harness_result = None
+        if self._agent_mode == "B2":
+            harness_result = self._run_harness(
+                dataset_ref, incident_id=iid, run_id=rid, scenario_id=scenario_id
+            )
+            ledger = harness_result.ledger
+            anomalous_stages = harness_result.anomalous_stages
+            funnel_summary = harness_result.funnel_summary
+            tool_results = list(harness_result.tool_results)
+            missing_data = harness_result.missing_data
+        else:
+            # Step 1: validate dataset
+            missing_data, _ = self._validate_dataset(dataset_ref)
+            # Step 2: execute fixed tool pipeline
+            ledger, anomalous_stages, funnel_summary, tool_results = self._run_tool_pipeline(
+                dataset_ref
+            )
 
         # Step 3: build context
         context = ContextBuilder().build(
@@ -140,11 +192,17 @@ class DiagnosisOrchestrator:
         # Step 4: generate + validate with one correction retry
         report, issues = self._generate_with_retry(context)
 
-        # Only raise for truly blocking non-retryable issues (e.g. schema
-        # version mismatch, structural violations).  Warning-level issues
-        # (R11_BENEFIT_ONLY — "not an error, but recorded as a warning")
-        # are returned alongside the report so callers can inspect them.
-        blocking = [i for i in issues if not i.retryable and i.code.startswith(("R12", "R3"))]
+        # Step 5: apply the evidence contract to the report that will actually
+        # be published, then re-validate so `validation_issues` describes the
+        # artifact consumers receive rather than the adapter's raw output.
+        report, contract_notes = self._apply_evidence_contract(report, context)
+        issues = self._validator.validate(report, context) + contract_notes
+
+        # Blocking issues are those that make the report unpublishable: a schema
+        # mismatch, or a NEEDS_DATA report that still asserts root causes.
+        # Evidence-contract downgrades are applied above, not raised — an
+        # UNKNOWN claim is a legitimate published outcome (notes § 9.4).
+        blocking = [i for i in issues if not i.retryable and i.code in _BLOCKING_CODES]
         if blocking:
             codes = ", ".join(i.code for i in blocking)
             raise OrchestratorFailure(
@@ -157,6 +215,94 @@ class DiagnosisOrchestrator:
             ledger=ledger,
             tool_results=tuple(tool_results),
             validation_issues=tuple(issues),
+            agent_mode=self._agent_mode,
+            hypotheses=harness_result.hypotheses if harness_result else (),
+            steps=tuple(harness_result.steps) if harness_result else (),
+            blocked_calls=tuple(harness_result.blocked_calls) if harness_result else (),
+            degradations=tuple(harness_result.degradations) if harness_result else (),
+            early_exit_reason=harness_result.early_exit_reason if harness_result else None,
+            incident_scope=harness_result.incident_scope if harness_result else {},
+            capability_bundle=(
+                {
+                    "signals": list(harness_result.bundle.signals),
+                    "allowed_tools": sorted(harness_result.bundle.allowed_tools),
+                    "rationale": harness_result.bundle.rationale,
+                }
+                if harness_result
+                else {}
+            ),
+            policy_name=harness_result.policy_name if harness_result else None,
+            policy_model_name=harness_result.policy_model_name if harness_result else None,
+            policy_fallback_used=harness_result.fallback_used if harness_result else False,
+            policy_fallback_reason=harness_result.fallback_reason if harness_result else None,
+            input_tokens=harness_result.input_tokens if harness_result else None,
+            output_tokens=harness_result.output_tokens if harness_result else None,
+        )
+
+    def _run_harness(self, dataset_ref: str, *, incident_id: str, run_id: str, scenario_id: str):
+        """Delegate evidence gathering to the governed investigation loop."""
+        harness = DiagnosticHarness(
+            self._source,
+            artifacts=self._artifacts,
+            policy=self._investigation_policy,
+            max_tool_calls=self._max_tool_calls,
+            evidence_code_prefix=self._evidence_code_prefix,
+        )
+        return harness.run(
+            dataset_ref,
+            incident_id=incident_id,
+            diagnosis_run_id=run_id,
+            scenario_id=scenario_id,
+        )
+
+    def _apply_evidence_contract(
+        self, report: DiagnosisReport, context: DiagnosisContext
+    ) -> tuple[DiagnosisReport, list[ValidationIssue]]:
+        """Downgrade claims the evidence cannot carry and rebalance the ledger.
+
+        A claim with no positive evidence is republished as UNKNOWN, and its loss
+        estimate moves from ``explained`` to ``unexplained``. The downgrade is
+        returned as a ValidationIssue so the trace records what changed — the
+        report is never silently altered.
+        """
+        if not report.root_causes:
+            return report, []
+
+        run_evidence = {e.evidence_code: e for e in context.evidence_list}
+        notes: list[ValidationIssue] = []
+        causes: list[RootCause] = []
+        explainable = 0
+
+        for i, rc in enumerate(report.root_causes):
+            status, reason = resolve_support_status(rc.label, rc.evidence_codes, run_evidence)
+            if status != rc.support_status:
+                notes.append(
+                    ValidationIssue(
+                        "R14_UNSUPPORTED_STATUS",
+                        f"root_causes[{i}].support_status",
+                        f"{rc.label}: {rc.support_status} -> {status} ({reason})",
+                        retryable=False,
+                    )
+                )
+                causes.append(rc.model_copy(update={"support_status": status}))
+            else:
+                causes.append(rc)
+            if status != "UNKNOWN":
+                explainable += rc.estimated_lost_intents or 0
+
+        total = report.total_estimated_lost_intents
+        explained = min(explainable, total)
+        unexplained = max(0, total - explained)
+
+        return (
+            report.model_copy(
+                update={
+                    "root_causes": causes,
+                    "explained_lost_intents": explained,
+                    "unexplained_lost_intents": unexplained,
+                }
+            ),
+            notes,
         )
 
     # ------------------------------------------------------------------

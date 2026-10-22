@@ -779,3 +779,125 @@ class TestStateMachineScenarios:
 
         resp = await client.get(f"/api/v1/diagnosis-runs/{run_id}")
         assert resp.json()["status"] == "NEEDS_DATA"
+
+
+# ---------------------------------------------------------------------------
+# Harness persistence: support status and the investigation ledger (W5)
+# ---------------------------------------------------------------------------
+
+
+def _report_with_claims(*claims):
+    from app.diagnosis.report import DiagnosisReport, RootCause
+
+    return DiagnosisReport(
+        incident_id="inc",
+        diagnosis_run_id="run",
+        status="SUCCEEDED",
+        summary="summary",
+        root_causes=[
+            RootCause(
+                label=label,
+                confidence=confidence,
+                explanation="x",
+                evidence_codes=[],
+                rank=index + 1,
+                support_status=status,
+            )
+            for index, (label, confidence, status) in enumerate(claims)
+        ],
+        ontology_version="paytrace.ontology.v1",
+        validator_version="paytrace.validator.v1",
+    )
+
+
+def test_persisted_root_cause_keeps_its_support_status(db_session):
+    """A claim's support status must survive the round trip to the API."""
+    from app.db.models import DiagnosisRun, Incident
+    from app.incidents import service
+
+    incident = service.create_incident(
+        db_session,
+        title="t",
+        scenario_id="mixed_failure",
+        dataset_ref="/data/x.parquet",
+        baseline_start=datetime(2026, 7, 1, tzinfo=UTC),
+        baseline_end=datetime(2026, 7, 8, tzinfo=UTC),
+        incident_start=datetime(2026, 7, 8, tzinfo=UTC),
+        incident_end=datetime(2026, 7, 15, tzinfo=UTC),
+        trigger_metric="payment_completion_rate",
+        baseline_value=0.9,
+        observed_value=0.8,
+        ontology_version="paytrace.ontology.v1",
+    )
+    run, _ = service.create_or_get_run(db_session, incident.id, "key-1")
+
+    report = _report_with_claims(
+        ("CHANNEL_TIMEOUT", "HIGH", "SUPPORTED"),
+        ("BENEFIT_SELECTION_FRICTION", "MEDIUM", "PARTIAL"),
+        ("UNKNOWN", "LOW", "UNKNOWN"),
+    )
+    report = report.model_copy(
+        update={"incident_id": str(incident.id), "diagnosis_run_id": str(run.id)}
+    )
+    service.persist_report(db_session, run_id=run.id, report=report, validator_version="v1")
+    db_session.commit()
+
+    _, findings = service.get_report(db_session, run.id)
+    by_label = {f.label: f.support_status for f in findings}
+    assert by_label == {
+        "CHANNEL_TIMEOUT": "SUPPORTED",
+        "BENEFIT_SELECTION_FRICTION": "PARTIAL",
+        "UNKNOWN": "UNKNOWN",
+    }
+    assert db_session.query(DiagnosisRun).filter(DiagnosisRun.id == run.id).count() == 1
+    assert db_session.query(Incident).count() == 1
+
+
+def test_hypothesis_ledger_round_trips(db_session):
+    from app.harness.ledger import HypothesisLedger
+    from app.incidents import service
+
+    incident = service.create_incident(
+        db_session,
+        title="t",
+        scenario_id="mixed_failure",
+        dataset_ref="/data/x.parquet",
+        baseline_start=datetime(2026, 7, 1, tzinfo=UTC),
+        baseline_end=datetime(2026, 7, 8, tzinfo=UTC),
+        incident_start=datetime(2026, 7, 8, tzinfo=UTC),
+        incident_end=datetime(2026, 7, 15, tzinfo=UTC),
+        trigger_metric="payment_completion_rate",
+        baseline_value=0.9,
+        observed_value=0.8,
+        ontology_version="paytrace.ontology.v1",
+    )
+    run, _ = service.create_or_get_run(db_session, incident.id, "key-2")
+
+    ledger = HypothesisLedger()
+    supported = ledger.propose("CHANNEL_TIMEOUT", required_next_tool="inspect_payment_events")
+    ledger.record_evidence(supported.hypothesis_id, "EV-001", supports=True)
+    ledger.resolve(supported.hypothesis_id, "SUPPORTED")
+    rejected = ledger.propose("CALLBACK_FAILURE", required_next_tool="inspect_payment_events")
+    ledger.resolve(rejected.hypothesis_id, "REJECTED", reason="no callback evidence")
+
+    service.persist_hypotheses(db_session, run_id=run.id, hypotheses=ledger.all())
+    db_session.commit()
+
+    stored = service.get_hypotheses(db_session, run.id)
+    assert [h.hypothesis_id for h in stored] == ["H-01", "H-02"]
+    assert stored[0].status == "SUPPORTED"
+    assert stored[0].supporting_evidence == ["EV-001"]
+    assert stored[1].status == "REJECTED"
+    assert stored[1].rejection_reason == "no callback evidence"
+
+
+def test_persist_hypotheses_rejects_an_unknown_run(db_session):
+    """FK-less design: the service must prove the parent run exists."""
+    import uuid as uuid_module
+
+    import pytest
+
+    from app.incidents.service import ReferentialIntegrityError, persist_hypotheses
+
+    with pytest.raises(ReferentialIntegrityError):
+        persist_hypotheses(db_session, run_id=uuid_module.uuid4(), hypotheses=[])

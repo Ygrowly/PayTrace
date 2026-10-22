@@ -82,6 +82,36 @@ class GetPaymentFunnelTool(_BaseTool):
                 )
             )
         if not res.anomalous_stages:
+            baseline_rate = (
+                res.baseline.completed_count / res.baseline.order_confirmed_count
+                if res.baseline.order_confirmed_count
+                else 0.0
+            )
+            incident_rate = (
+                res.incident.completed_count / res.incident.order_confirmed_count
+                if res.incident.order_confirmed_count
+                else 0.0
+            )
+            # Negative evidence: "nothing degraded" is a system-computed fact too.
+            # It supports a no-anomaly conclusion but never a positive root cause,
+            # so validators must not treat it as positive evidence (see R10).
+            evidence.append(
+                EvidenceDraft(
+                    evidence_type=EvidenceType.FUNNEL_BASELINE_STABLE,
+                    summary=(
+                        f"No funnel stage degraded vs baseline across "
+                        f"{len(res.deltas)} stages; overall completion "
+                        f"{baseline_rate:.3f} -> {incident_rate:.3f}"
+                    ),
+                    metrics={
+                        "checked_stages": len(res.deltas),
+                        "baseline_completion_rate": round(baseline_rate, 6),
+                        "incident_completion_rate": round(incident_rate, 6),
+                        "baseline_order_confirmed": res.baseline.order_confirmed_count,
+                        "incident_order_confirmed": res.incident.order_confirmed_count,
+                    },
+                )
+            )
             warnings.append("no anomalous funnel stages detected")
 
         summary = (

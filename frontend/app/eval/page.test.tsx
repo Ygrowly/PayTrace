@@ -12,42 +12,25 @@ vi.mock("@/lib/api/client", async () => {
   return { ...actual, apiRequest: apiRequestMock };
 });
 
-vi.mock("@/components/charts/evaluation-chart", () => ({
-  EvaluationChart: () => <div data-testid="evaluation-chart" />,
-}));
-
 import EvalPage from "./page";
 
-const emptyRuns = { items: [], page: 1, page_size: 8, total: 0 };
+const emptyRuns = { items: [], page: 1, page_size: 12, total: 0 };
 const runId = "11111111-1111-4111-8111-111111111111";
 
-function queuedRun() {
+function baseRun(overrides: Record<string, unknown> = {}) {
   return {
     id: runId,
-    status: "QUEUED",
-    model_mode: "B1",
-    model_name: "demo-model",
-    prompt_version: "diagnosis_v1",
-    scenario_kinds: ["normal"],
+    status: "SUCCEEDED",
+    model_mode: "B2",
+    model_name: null,
+    prompt_version: null,
+    scenario_kinds: ["mixed_failure"],
     seed: 42,
     num_intents: 500,
     scenario_count: 1,
-    metrics: null,
-    scenario_results: null,
-    badcases: null,
-    error_message: null,
-    created_at: "2026-08-20T10:00:00Z",
-    updated_at: "2026-08-20T10:00:00Z",
-  };
-}
-
-function succeededB1Run() {
-  return {
-    ...queuedRun(),
-    status: "SUCCEEDED",
     metrics: {
-      scenario_count: 2,
-      succeeded_count: 2,
+      scenario_count: 1,
+      succeeded_count: 1,
       run_success_rate: 1,
       stage_localization_exact_rate: 1,
       stage_localization_overlap_mean: 1,
@@ -56,37 +39,38 @@ function succeededB1Run() {
       root_cause_f1_mean: 1,
       evidence_validity_rate_mean: 1,
       unsupported_claim_rate_mean: 0,
+      loss_attribution_mape: 0.08,
+      tool_call_count_mean: 2.17,
       badcase_count: 0,
-      model_invocation_count: 1,
+      model_invocation_count: 0,
       fallback_count: 1,
-      total_input_tokens: 120,
-      total_output_tokens: 30,
+      total_input_tokens: null,
+      total_output_tokens: null,
     },
     scenario_results: [
       {
-        scenario_kind: "normal",
-        scenario_id: "normal-42",
+        scenario_kind: "mixed_failure",
+        scenario_id: "mixed-42",
         diagnosis_status: "SUCCEEDED",
-        adapter_name: "OpenAICompatibleModelAdapter",
-        fallback_used: false,
-        predicted_root_causes: ["NORMAL_PAYMENT_FAILURE"],
-        expected_root_causes: ["NORMAL_PAYMENT_FAILURE"],
-        badcases: [],
-        root_cause_f1: 1,
-      },
-      {
-        scenario_kind: "channel_timeout",
-        scenario_id: "timeout-42",
-        diagnosis_status: "SUCCEEDED",
+        agent_mode: "B2",
+        // The report writer stays the rule adapter on purpose; B2's provenance
+        // is the policy that gathered the evidence.
         adapter_name: "RuleBasedModelAdapter",
+        policy_name: "OpenAIToolCallingPolicy",
+        tool_call_count: 6,
         fallback_used: true,
         fallback_reason: "MODEL_CALL_FAILED",
-        predicted_root_causes: ["CHANNEL_TIMEOUT"],
-        expected_root_causes: ["CHANNEL_TIMEOUT"],
-        badcases: [],
+        stage_exact: true,
         root_cause_f1: 1,
+        loss_attribution_rel_error: 0.08,
+        badcases: [],
       },
     ],
+    badcases: [],
+    error_message: null,
+    created_at: "2026-09-12T10:00:00Z",
+    updated_at: "2026-09-12T10:00:00Z",
+    ...overrides,
   };
 }
 
@@ -106,66 +90,80 @@ describe("Eval Lab", () => {
     apiRequestMock.mockResolvedValue(emptyRuns);
   });
 
-  it("shows B1 cost and fallback boundaries only for model-backed mode", async () => {
+  it("defaults to the investigated mode and explains what it does", async () => {
     renderPage();
     expect(await screen.findByText("No evaluation selected")).toBeInTheDocument();
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Prompt version")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("radio", { name: /B1 · Model backed/i }));
-
-    expect(screen.getByRole("note")).toHaveTextContent("falls back to B0");
-    expect(screen.getByRole("note")).toHaveTextContent("not a guaranteed model invocation");
-    expect(screen.getByLabelText("Prompt version")).toBeInTheDocument();
+    const b2 = screen.getByRole("radio", { name: /B2/ });
+    expect(b2).toBeChecked();
+    // The selected mode's explanation is shown; the others stay collapsed.
+    expect(
+      screen.getByText(/Routed capabilities, a hypothesis ledger and a budget/i),
+    ).toBeInTheDocument();
   });
 
-  it("submits the explicit B1 contract with all selected scenarios", async () => {
+  it("submits B2 without a prompt version", async () => {
     apiRequestMock.mockImplementation(async (path: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         return { evaluation_run_id: runId, status: "QUEUED", created: true };
       }
-      if (path.endsWith(`/${runId}`)) return queuedRun();
+      if (path.endsWith(`/${runId}`)) return baseRun({ status: "QUEUED" });
       return emptyRuns;
     });
     renderPage();
 
-    fireEvent.click(screen.getByRole("radio", { name: /B1 · Model backed/i }));
-    fireEvent.change(screen.getByLabelText("Prompt version"), {
-      target: { value: "diagnosis_v2" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Run B1 evaluation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run B2 evaluation" }));
 
     await waitFor(() => {
       const request = apiRequestMock.mock.calls.find(([, init]) => init?.method === "POST");
-      expect(request).toBeDefined();
       const body = JSON.parse(String(request?.[1]?.body));
-      expect(body).toMatchObject({
-        model_mode: "B1",
-        prompt_version: "diagnosis_v2",
-        seed: 42,
-        num_intents: 500,
-      });
+      expect(body).toMatchObject({ model_mode: "B2", prompt_version: null, seed: 42 });
       expect(body.scenario_kinds).toHaveLength(7);
     });
   });
 
-  it("distinguishes verified model calls from rule fallbacks", async () => {
+  it("asks for a prompt version only in the one-shot mode", async () => {
+    renderPage();
+    await screen.findByText("No evaluation selected");
+    expect(screen.queryByText("Prompt version")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /B1/ }));
+    expect(screen.getByText("Prompt version")).toBeInTheDocument();
+  });
+
+  it("shows the investigation policy rather than the report writer", async () => {
     apiRequestMock.mockImplementation(async (path: string) => {
-      if (path.endsWith(`/${runId}`)) return succeededB1Run();
-      return {
-        ...emptyRuns,
-        total: 1,
-        items: [queuedRun()],
-      };
+      if (path.endsWith(`/${runId}`)) return baseRun();
+      return { ...emptyRuns, total: 1, items: [baseRun()] };
     });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: new RegExp(runId) }));
-
-    expect(await screen.findByText("Verified model calls")).toBeInTheDocument();
-    expect(screen.getByText("Rule fallbacks")).toBeInTheDocument();
-    expect(screen.getByText("Recorded tokens")).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Open the B2 evaluation/ }),
+    );
+    // The scenario row must name the policy, and must not claim a model call.
+    expect(await screen.findByText("model · tool-calling")).toBeInTheDocument();
     expect(screen.getByText("MODEL_CALL_FAILED")).toBeInTheDocument();
-    expect(screen.getByText("OpenAICompatibleModelAdapter")).toBeInTheDocument();
+  });
+
+  it("fills the comparison column from another mode run at the same seed", async () => {
+    const b0 = baseRun({
+      id: "22222222-2222-4222-8222-222222222222",
+      model_mode: "B0",
+      metrics: { ...baseRun().metrics, tool_call_count_mean: 6, fallback_count: 0 },
+    });
+    apiRequestMock.mockImplementation(async (path: string) => {
+      if (path.endsWith(`/${runId}`)) return baseRun();
+      return { ...emptyRuns, total: 2, items: [baseRun(), b0] };
+    });
+    renderPage();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Open the B2 evaluation/ }),
+    );
+
+    // Both modes appear as columns, so the delta is a real comparison.
+    expect(await screen.findByText("Tool calls per scenario")).toBeInTheDocument();
+    expect(screen.getByText("6.00")).toBeInTheDocument();
   });
 });

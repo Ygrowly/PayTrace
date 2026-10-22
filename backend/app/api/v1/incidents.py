@@ -29,6 +29,7 @@ from app.incidents.schemas import (
     IncidentCreate,
     IncidentListResponse,
     IncidentResponse,
+    IncidentRootCauseSummary,
     PaginationMeta,
     SimulatedIncidentCreate,
 )
@@ -45,10 +46,25 @@ def _trace_id(request: Request) -> str:
 
 def _incident_response(db: Session, incident) -> IncidentResponse:  # noqa: ANN001
     latest = service.get_latest_run_for_incident(db, incident.id)
+    lost: int | None = None
+    causes: list[IncidentRootCauseSummary] = []
+    if latest is not None and latest.status in {"SUCCEEDED", "NEEDS_DATA"}:
+        total, findings = service.get_report_headline(db, latest.id)
+        lost = total
+        causes = [
+            IncidentRootCauseSummary(
+                label=finding.label,
+                support_status=finding.support_status,  # type: ignore[arg-type]
+                estimated_lost_intents=finding.estimated_lost_intents,
+            )
+            for finding in findings
+        ]
     return IncidentResponse.model_validate(incident).model_copy(
         update={
             "latest_diagnosis_run_id": latest.id if latest else None,
             "latest_diagnosis_status": latest.status if latest else None,
+            "latest_lost_intents": lost,
+            "latest_root_causes": causes,
         }
     )
 

@@ -2,21 +2,18 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { EvaluationChart } from "@/components/charts/evaluation-chart";
 import { Icon } from "@/components/icons";
 import {
-  EmptyState,
+  Button,
   ErrorState,
-  KpiCard,
   LoadingState,
   PageHeader,
-  SectionCard,
+  Panel,
 } from "@/components/page-elements";
-import { StatusBadge } from "@/components/status-badge";
+import { RunStatus } from "@/components/status-badge";
 import {
   ApiError,
   apiRequest,
-  apiUrl,
   jsonBody,
   type EvaluationCreate,
   type EvaluationList,
@@ -25,7 +22,7 @@ import {
 } from "@/lib/api/client";
 import { formatNumber, formatPercent, humanize } from "@/lib/format";
 
-const scenarios = [
+const SCENARIOS = [
   "normal",
   "benefit_friction",
   "channel_timeout",
@@ -34,72 +31,138 @@ const scenarios = [
   "adversarial_irrelevant_config",
   "adversarial_noise",
 ];
-const terminalStatuses = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "DISPATCH_FAILED"]);
-const failureStatuses = new Set(["FAILED", "CANCELLED", "DISPATCH_FAILED"]);
+
+const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED", "DISPATCH_FAILED"]);
 
 type ModelMode = NonNullable<EvaluationCreate["model_mode"]>;
-type Badcase = { scenario_kind?: string; categories?: string[]; summary?: string };
-type ScenarioResult = NonNullable<EvaluationRun["scenario_results"]>[number];
+type Run = EvaluationRun;
 
-function asBadcase(value: { [key: string]: unknown }): Badcase {
-  return value as unknown as Badcase;
+/* Class names mean nothing to a reader; say what actually ran. */
+const GATHERED_BY: Record<string, string> = {
+  OpenAIToolCallingPolicy: "model · tool-calling",
+  ScriptedInvestigationPolicy: "scripted policy",
+  RuleBasedModelAdapter: "rule adapter",
+  OpenAICompatibleModelAdapter: "one-shot model",
+};
+
+function gatheredBy(result: {
+  agent_mode?: string | null;
+  policy_name?: string | null;
+  adapter_name?: string | null;
+}): string {
+  const name =
+    result.agent_mode === "B2" && result.policy_name
+      ? result.policy_name
+      : result.adapter_name;
+  if (!name) return "—";
+  return GATHERED_BY[name] ?? name;
 }
 
-function toggle(items: string[], item: string): string[] {
-  return items.includes(item) ? items.filter((current) => current !== item) : [...items, item];
-}
-
-function scenarioLabels(result: ScenarioResult, predicted: boolean): string[] {
-  const causes = predicted ? result.predicted_root_causes ?? [] : result.expected_root_causes ?? [];
-  const gaps = predicted ? result.predicted_missing_data ?? [] : result.expected_data_gaps ?? [];
-  return [...new Set([...causes, ...gaps])];
-}
-
-function ModelModeOption({
-  mode,
-  selected,
-  title,
-  description,
-  onSelect,
-}: {
+const MODES: {
   mode: ModelMode;
-  selected: boolean;
-  title: string;
-  description: string;
-  onSelect: (mode: ModelMode) => void;
-}) {
-  return (
-    <label
-      className={`block cursor-pointer rounded-lg border p-3 transition-colors duration-150 ${
-        selected
-          ? mode === "B0"
-            ? "border-blue-300 bg-blue-50 text-blue-950"
-            : "border-amber-300 bg-amber-50 text-amber-950"
-          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-      }`}
-    >
-      <input
-        checked={selected}
-        className="sr-only"
-        name="model-mode"
-        onChange={() => onSelect(mode)}
-        type="radio"
-        value={mode}
-      />
-      <span className="flex items-center justify-between gap-3">
-        <span className="font-mono text-sm font-semibold">{title}</span>
-        {selected && <Icon name="check" size={16} strokeWidth={2} />}
-      </span>
-      <span className="mt-1 block text-xs leading-5 opacity-75">{description}</span>
-    </label>
-  );
-}
+  name: string;
+  summary: string;
+  detail: string;
+}[] = [
+  {
+    mode: "B0",
+    name: "Fixed pipeline",
+    summary: "Six tools, always the same order.",
+    detail:
+      "Deterministic rule adapter, no API key and no paid call. The baseline the investigated run is measured against.",
+  },
+  {
+    mode: "B1",
+    name: "One-shot model",
+    summary: "One model call writes the report.",
+    detail:
+      "The same fixed pipeline, but the report is written by the configured model. Falls back to rules — the run says which happened.",
+  },
+  {
+    mode: "B2",
+    name: "Investigated",
+    summary: "The harness chooses what to run.",
+    detail:
+      "Routed capabilities, a hypothesis ledger and a budget. Uses the model when it is reachable, the deterministic policy otherwise, and records which.",
+  },
+];
+
+/**
+ * Metrics as ledger rows rather than a bar chart.
+ *
+ * The comparison that matters is against the other evidence-gathering mode, not
+ * against 100% — a bar chart of five near-1.0 values communicates nothing.
+ */
+const METRIC_ROWS: {
+  key: keyof NonNullable<Run["metrics"]>;
+  label: string;
+  format: (value: number) => string;
+  higherIsBetter: boolean;
+  note: string;
+}[] = [
+  {
+    key: "run_success_rate",
+    label: "Runs completed",
+    format: (v) => formatPercent(v),
+    higherIsBetter: true,
+    note: "scenarios that reached a report",
+  },
+  {
+    key: "stage_localization_exact_rate",
+    label: "Stage localized exactly",
+    format: (v) => formatPercent(v),
+    higherIsBetter: true,
+    note: "predicted degraded stages equal Ground Truth",
+  },
+  {
+    key: "root_cause_f1_mean",
+    label: "Root cause F1",
+    format: (v) => v.toFixed(3),
+    higherIsBetter: true,
+    note: "seven scenarios with one dedicated rule each — not a generalisation measure",
+  },
+  {
+    key: "unsupported_claim_rate_mean",
+    label: "Unsupported claims",
+    format: (v) => formatPercent(v),
+    higherIsBetter: false,
+    note: "claims the evidence contract could not carry",
+  },
+  {
+    key: "loss_attribution_mape",
+    label: "Loss attribution error",
+    format: (v) => formatPercent(v),
+    higherIsBetter: false,
+    note: "mean relative error against the injected fault's true impact",
+  },
+  {
+    key: "evidence_validity_rate_mean",
+    label: "Evidence valid",
+    format: (v) => formatPercent(v),
+    higherIsBetter: true,
+    note: "cited records that exist and came from a successful call",
+  },
+  {
+    key: "tool_call_count_mean",
+    label: "Tool calls per scenario",
+    format: (v) => v.toFixed(2),
+    higherIsBetter: false,
+    note: "the cost of gathering the evidence",
+  },
+  {
+    key: "badcase_count",
+    label: "Badcase scenarios",
+    format: (v) => formatNumber(v),
+    higherIsBetter: false,
+    note: "scenarios with any recorded failure",
+  },
+];
 
 export default function EvalPage() {
   const queryClient = useQueryClient();
   const [runId, setRunId] = useState<string | null>(null);
-  const [modelMode, setModelMode] = useState<ModelMode>("B0");
-  const [scenarioKinds, setScenarioKinds] = useState<string[]>(scenarios);
+  const [modelMode, setModelMode] = useState<ModelMode>("B2");
+  const [scenarioKinds, setScenarioKinds] = useState<string[]>(SCENARIOS);
   const [seed, setSeed] = useState(42);
   const [numIntents, setNumIntents] = useState(500);
   const [promptVersion, setPromptVersion] = useState("diagnosis_v1");
@@ -107,17 +170,19 @@ export default function EvalPage() {
   const recentRuns = useQuery<EvaluationList, ApiError>({
     queryKey: ["evaluation-runs"],
     queryFn: () =>
-      apiRequest<EvaluationList>("/api/v1/evaluation-runs?page=1&page_size=8"),
+      apiRequest<EvaluationList>("/api/v1/evaluation-runs?page=1&page_size=12"),
   });
-  const currentRun = useQuery<EvaluationRun, ApiError>({
+
+  const currentRun = useQuery<Run, ApiError>({
     enabled: Boolean(runId),
     queryKey: ["evaluation-run", runId],
-    queryFn: () => apiRequest<EvaluationRun>(`/api/v1/evaluation-runs/${runId}`),
+    queryFn: () => apiRequest<Run>(`/api/v1/evaluation-runs/${runId}`),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status && terminalStatuses.has(status) ? false : 1500;
+      return status && TERMINAL.has(status) ? false : 1500;
     },
   });
+
   const submit = useMutation<EvaluationTrigger, ApiError, EvaluationCreate>({
     mutationFn: (body) =>
       apiRequest<EvaluationTrigger>("/api/v1/evaluation-runs", {
@@ -132,85 +197,98 @@ export default function EvalPage() {
   });
 
   const run = currentRun.data;
-  const metrics = run?.metrics;
+  const metrics = run?.metrics ?? null;
   const canSubmit = scenarioKinds.length > 0 && numIntents >= 1 && numIntents <= 10000;
-  const submitRun = () =>
-    submit.mutate({
-      model_mode: modelMode,
-      prompt_version: modelMode === "B1" ? promptVersion || null : null,
-      scenario_kinds: scenarioKinds,
-      seed,
-      num_intents: numIntents,
-    });
+
+  // The comparison that carries information: the same seed, the other mode.
+  const counterpart =
+    run && TERMINAL.has(run.status)
+      ? (recentRuns.data?.items ?? []).find(
+          (item) =>
+            item.id !== run.id &&
+            item.model_mode !== run.model_mode &&
+            item.seed === run.seed &&
+            item.num_intents === run.num_intents &&
+            item.metrics,
+        )
+      : undefined;
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-6">
       <PageHeader
-        description="Compare the fixed evidence workflow against isolated Ground Truth. Run the deterministic baseline or request the configured model adapter."
+        description="Every scenario carries an injected fault with its Ground Truth held separately. The evaluator compares the diagnosis against it after the diagnosis has finished — the diagnosis itself never sees it."
         eyebrow="Evaluation / Lab"
         title="Eval Lab"
       />
 
-      <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
-        <SectionCard
-          eyebrow={modelMode === "B0" ? "Deterministic / no paid calls" : "Model-backed / fallback enabled"}
-          title="New evaluation"
-        >
-          <div className="space-y-5">
+      <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <div className="space-y-6">
+          <Panel eyebrow="How the evidence gets gathered" title="New evaluation">
             <fieldset>
-              <legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Model mode
-              </legend>
-              <div className="mt-2 grid gap-2">
-                <ModelModeOption
-                  description="Deterministic RuleBasedModelAdapter. No API key or paid call."
-                  mode="B0"
-                  onSelect={setModelMode}
-                  selected={modelMode === "B0"}
-                  title="B0 · Rule based"
-                />
-                <ModelModeOption
-                  description="Requests the configured OpenAI-compatible adapter. May incur model cost."
-                  mode="B1"
-                  onSelect={setModelMode}
-                  selected={modelMode === "B1"}
-                  title="B1 · Model backed"
-                />
+              <legend className="eyebrow">Mode</legend>
+              <div className="mt-2.5 space-y-1.5">
+                {MODES.map((item) => {
+                  const selected = modelMode === item.mode;
+                  return (
+                    <label
+                      className={`block cursor-pointer rounded-[2px] border p-3 transition-colors duration-150 ${
+                        selected
+                          ? "border-petrol-2 bg-petrol-soft"
+                          : "border-rule-2 bg-surface hover:border-ink-3"
+                      }`}
+                      key={item.mode}
+                    >
+                      <input
+                        checked={selected}
+                        className="sr-only"
+                        name="model-mode"
+                        onChange={() => setModelMode(item.mode)}
+                        type="radio"
+                        value={item.mode}
+                      />
+                      <span className="flex items-center gap-2">
+                        <span className="font-mono text-[11px] font-semibold text-ink">
+                          {item.mode}
+                        </span>
+                        <span className="text-[12px] font-medium text-ink">
+                          {item.name}
+                        </span>
+                        {selected && (
+                          <Icon
+                            className="ml-auto text-petrol-2"
+                            name="check"
+                            size={14}
+                          />
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-ink-2">
+                        {item.summary}
+                      </span>
+                      {selected && (
+                        <span className="mt-2 block border-t border-petrol-2/20 pt-2 text-[11px] leading-5 text-ink-2">
+                          {item.detail}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })}
               </div>
             </fieldset>
 
-            {modelMode === "B1" && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900" role="note">
-                B1 falls back to B0 when model configuration is missing or the model call fails. The run shows the requested mode and configured model, not a guaranteed model invocation.
-              </div>
-            )}
-
-            {modelMode === "B1" && (
-              <label className="block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Prompt version
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <label>
+                <span className="eyebrow">Seed</span>
                 <input
-                  className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal normal-case tracking-normal outline-none transition-colors duration-150 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  onChange={(event) => setPromptVersion(event.target.value)}
-                  placeholder="diagnosis_v1"
-                  value={promptVersion}
-                />
-              </label>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Seed
-                <input
-                  className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm font-normal tracking-normal outline-none transition-colors duration-150 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="tnum mt-2 w-full rounded-[2px] border border-rule-2 bg-surface px-3 py-2 font-mono text-[12px] outline-none transition-colors focus:border-petrol-2"
                   onChange={(event) => setSeed(Number(event.target.value))}
                   type="number"
                   value={seed}
                 />
               </label>
-              <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Intents
+              <label>
+                <span className="eyebrow">Intents</span>
                 <input
-                  className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2.5 font-mono text-sm font-normal tracking-normal outline-none transition-colors duration-150 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="tnum mt-2 w-full rounded-[2px] border border-rule-2 bg-surface px-3 py-2 font-mono text-[12px] outline-none transition-colors focus:border-petrol-2"
                   max={10000}
                   min={1}
                   onChange={(event) => setNumIntents(Number(event.target.value))}
@@ -219,369 +297,393 @@ export default function EvalPage() {
                 />
               </label>
             </div>
+            <p className="mt-2 text-[11px] leading-5 text-ink-3">
+              Loss attribution error is scale-dependent — about 10% at 500
+              intents, about 4% at 5000. Quote the intent count with any figure.
+            </p>
 
-            <fieldset>
-              <legend className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                Scenario set
-              </legend>
-              <div className="mt-3 space-y-2">
-                {scenarios.map((scenario) => (
-                  <label
-                    className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-100 px-3 py-2.5 text-sm text-slate-700 transition-colors duration-150 hover:border-blue-200 hover:bg-blue-50/50"
-                    key={scenario}
-                  >
-                    <input
-                      checked={scenarioKinds.includes(scenario)}
-                      className="h-4 w-4 accent-blue-700"
-                      onChange={() => setScenarioKinds((current) => toggle(current, scenario))}
-                      type="checkbox"
-                    />
-                    <span>{humanize(scenario)}</span>
-                  </label>
-                ))}
+            {modelMode === "B1" && (
+              <label className="mt-4 block">
+                <span className="eyebrow">Prompt version</span>
+                <input
+                  className="mt-2 w-full rounded-[2px] border border-rule-2 bg-surface px-3 py-2 font-mono text-[12px] outline-none transition-colors focus:border-petrol-2"
+                  onChange={(event) => setPromptVersion(event.target.value)}
+                  value={promptVersion}
+                />
+              </label>
+            )}
+
+            <div className="mt-5">
+              <div className="flex items-baseline justify-between">
+                <span className="eyebrow">Scenario set</span>
+                <button
+                  className="cursor-pointer font-mono text-[10px] text-petrol-2 underline underline-offset-2"
+                  onClick={() =>
+                    setScenarioKinds(
+                      scenarioKinds.length === SCENARIOS.length ? [] : SCENARIOS,
+                    )
+                  }
+                  type="button"
+                >
+                  {scenarioKinds.length === SCENARIOS.length
+                    ? "clear all"
+                    : "select all"}
+                </button>
               </div>
-            </fieldset>
+              <div className="mt-2 space-y-px">
+                {SCENARIOS.map((scenario) => {
+                  const checked = scenarioKinds.includes(scenario);
+                  return (
+                    <label
+                      className={`flex cursor-pointer items-center gap-2.5 py-1.5 text-[12px] transition-colors ${
+                        checked ? "text-ink" : "text-ink-3 hover:text-ink-2"
+                      }`}
+                      key={scenario}
+                    >
+                      <input
+                        checked={checked}
+                        className="accent-petrol"
+                        onChange={() =>
+                          setScenarioKinds((current) =>
+                            current.includes(scenario)
+                              ? current.filter((item) => item !== scenario)
+                              : [...current, scenario],
+                          )
+                        }
+                        type="checkbox"
+                      />
+                      {humanize(scenario)}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
 
+            <div className="mt-6 border-t border-rule pt-4">
+              <Button
+                disabled={!canSubmit || submit.isPending}
+                onClick={() =>
+                  submit.mutate({
+                    model_mode: modelMode,
+                    prompt_version: modelMode === "B1" ? promptVersion || null : null,
+                    scenario_kinds: scenarioKinds,
+                    seed,
+                    num_intents: numIntents,
+                  })
+                }
+              >
+                {submit.isPending && (
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                )}
+                Run {modelMode} evaluation
+              </Button>
+            </div>
             {submit.isError && (
-              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">
-                {submit.error.detail} Check the model configuration and try again.
+              <p className="mt-3 rounded-[2px] bg-alarm-soft p-3 text-[11px] text-alarm">
+                {submit.error.detail}
               </p>
             )}
-            <button
-              className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-blue-800 px-4 py-3 text-sm font-semibold text-white transition-[background-color,scale] duration-150 hover:bg-blue-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100"
-              disabled={!canSubmit || submit.isPending}
-              onClick={submitRun}
-              type="button"
-            >
-              {submit.isPending && (
-                <span
-                  aria-hidden="true"
-                  className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-blue-200 border-t-white"
-                />
-              )}
-              Run {modelMode} evaluation
-            </button>
-          </div>
-        </SectionCard>
+          </Panel>
 
-        <div className="space-y-5">
-          {!runId && !run ? (
-            <EmptyState
-              description="Run a baseline or model-backed evaluation to inspect aggregate metrics, scenario predictions, and badcases."
-              title="No evaluation selected"
-            />
-          ) : currentRun.isLoading ? (
-            <LoadingState label="Loading evaluation run" />
-          ) : currentRun.isError ? (
-            <ErrorState
-              message={currentRun.error.detail}
-              onRetry={() => void currentRun.refetch()}
-            />
+          <Panel eyebrow="Recent" title="Evaluation history">
+            {recentRuns.isLoading ? (
+              <LoadingState label="Loading runs" />
+            ) : (recentRuns.data?.items.length ?? 0) === 0 ? (
+              <p className="text-[12px] text-ink-3">No evaluations have run yet.</p>
+            ) : (
+              <ul className="divide-y divide-rule">
+                {recentRuns.data?.items.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      aria-label={`Open the ${item.model_mode} evaluation at seed ${item.seed}`}
+                      className={`flex w-full cursor-pointer items-center gap-2.5 py-2 text-left transition-colors hover:bg-paper-2/60 ${
+                        item.id === runId ? "text-ink" : "text-ink-2"
+                      }`}
+                      onClick={() => setRunId(item.id)}
+                      type="button"
+                    >
+                      <span className="font-mono text-[11px] font-semibold text-ink">
+                        {item.model_mode}
+                      </span>
+                      <span className="tnum font-mono text-[11px] text-ink-3">
+                        seed {item.seed}
+                      </span>
+                      <span className="tnum font-mono text-[11px] text-ink-3">
+                        {item.num_intents}
+                      </span>
+                      <span className="ml-auto">
+                        <RunStatus status={item.status} />
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </div>
+
+        <div className="space-y-6">
+          {!run ? (
+            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-[2px] border border-dashed border-rule-2 bg-surface px-8 text-center">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full border border-rule text-ink-3">
+                <Icon name="beaker" size={16} />
+              </span>
+              <h2 className="display mt-4 text-[14px] font-semibold text-ink">
+                No evaluation selected
+              </h2>
+              <p className="mt-1.5 max-w-md text-[12px] leading-5 text-ink-3">
+                Run one, or pick a previous run from the history. Comparing B0
+                against B2 with the same seed is the interesting comparison —
+                same conclusions, different cost.
+              </p>
+            </div>
           ) : (
-            run && (
-              <>
-                <div
-                  aria-live="polite"
-                  className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <StatusBadge status={run.status} />
-                  <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] font-semibold text-slate-600">
-                    Requested {run.model_mode}
+            <>
+              <Panel
+                action={
+                  <span className="tnum font-mono text-[11px] text-ink-3">
+                    {run.scenario_count} scenarios · seed {run.seed} ·{" "}
+                    {formatNumber(run.num_intents)} intents
                   </span>
-                  {run.model_mode === "B1" && (
-                    <span className="text-xs text-slate-500">
-                      Configured model: {run.model_name || "not recorded"}
-                    </span>
-                  )}
-                  <span className="font-mono text-xs text-slate-500">{run.id.slice(0, 12)}…</span>
-                  <span className="text-xs text-slate-400">
-                    {run.scenario_count} scenarios · seed {run.seed} · {run.num_intents} intents
-                  </span>
-                  {run.status === "SUCCEEDED" && (
-                    <div className="ml-auto flex gap-2">
-                      <a
-                        className="cursor-pointer rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors duration-150 hover:border-blue-200 hover:text-blue-800"
-                        download
-                        href={apiUrl(`/api/v1/evaluation-runs/${run.id}/report?format=json`)}
-                      >
-                        Download JSON
-                      </a>
-                      <a
-                        className="cursor-pointer rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors duration-150 hover:border-blue-200 hover:text-blue-800"
-                        download
-                        href={apiUrl(`/api/v1/evaluation-runs/${run.id}/report?format=markdown`)}
-                      >
-                        Download Markdown
-                      </a>
-                    </div>
-                  )}
-                </div>
-
-                {failureStatuses.has(run.status) && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 p-5" role="alert">
-                    <div className="font-semibold text-red-900">Evaluation did not complete</div>
-                    <p className="mt-2 text-sm text-red-800/80">
-                      {run.error_message || "Check the worker and model configuration, then submit a new run."}
-                    </p>
-                  </div>
-                )}
-                {!terminalStatuses.has(run.status) && (
-                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
-                    <div className="flex items-center gap-2 font-semibold text-blue-900">
-                      <span className="h-2 w-2 animate-pulse rounded-full bg-blue-600" />
-                      Evaluation is running
-                    </div>
-                    <p className="mt-2 text-sm text-blue-800/75">
-                      Progress is persisted. You can refresh this page without losing the run.
-                    </p>
-                  </div>
-                )}
-
-                {metrics && (
+                }
+                eyebrow={
+                  run.status === "SUCCEEDED"
+                    ? "Completed"
+                    : "Running — results appear as they land"
+                }
+                title={`${run.model_mode} · ${MODES.find((m) => m.mode === run.model_mode)?.name ?? ""}`}
+              >
+                {!TERMINAL.has(run.status) ? (
+                  <LoadingState label={`Evaluation ${run.status.toLowerCase()}`} />
+                ) : run.status === "FAILED" ? (
+                  <ErrorState message={run.error_message ?? "The run failed."} />
+                ) : (
                   <>
-                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                      <KpiCard
-                        detail={`${metrics.succeeded_count}/${metrics.scenario_count} scenarios`}
-                        label="Run success"
-                        tone="green"
-                        value={formatPercent(metrics.run_success_rate)}
-                      />
-                      <KpiCard
-                        detail="mean set F1"
-                        label="Root cause F1"
-                        tone="blue"
-                        value={metrics.root_cause_f1_mean.toFixed(3)}
-                      />
-                      <KpiCard
-                        detail="mean supported evidence"
-                        label="Evidence validity"
-                        tone="blue"
-                        value={formatPercent(metrics.evidence_validity_rate_mean)}
-                      />
-                      <KpiCard
-                        detail="needs inspection"
-                        label="Badcase scenarios"
-                        tone={metrics.badcase_count > 0 ? "amber" : "green"}
-                        value={formatNumber(metrics.badcase_count)}
-                      />
-                    </div>
-                    {run.model_mode === "B1" && (
-                      <div className="grid gap-4 sm:grid-cols-3">
-                        <KpiCard
-                          detail="scenarios completed by the configured model"
-                          label="Verified model calls"
-                          tone={metrics.model_invocation_count > 0 ? "green" : "amber"}
-                          value={formatNumber(metrics.model_invocation_count)}
-                        />
-                        <KpiCard
-                          detail="scenarios completed by the rule adapter"
-                          label="Rule fallbacks"
-                          tone={metrics.fallback_count > 0 ? "amber" : "green"}
-                          value={formatNumber(metrics.fallback_count)}
-                        />
-                        <KpiCard
-                          detail={`${formatNumber(metrics.total_input_tokens ?? 0)} input · ${formatNumber(metrics.total_output_tokens ?? 0)} output`}
-                          label="Recorded tokens"
-                          tone="blue"
-                          value={formatNumber(
-                            (metrics.total_input_tokens ?? 0) +
-                              (metrics.total_output_tokens ?? 0),
-                          )}
-                        />
-                      </div>
+                    {run.model_name && (
+                      <p className="mb-4 flex flex-wrap items-center gap-2 border-b border-rule pb-3 font-mono text-[11px] text-ink-3">
+                        <span className="eyebrow">Model requested</span>
+                        {run.model_name}
+                        {metrics && (
+                          <>
+                            <span className="h-3 w-px bg-rule-2" />
+                            <span className="eyebrow">Verified calls</span>
+                            <span className="tnum text-ink-2">
+                              {metrics.model_invocation_count}
+                            </span>
+                            <span className="eyebrow">Fallbacks</span>
+                            <span className="tnum text-ink-2">
+                              {metrics.fallback_count}
+                            </span>
+                          </>
+                        )}
+                      </p>
                     )}
-                    <SectionCard eyebrow="Backend metrics / ECharts" title="Aggregate quality">
-                      <EvaluationChart run={run} />
-                    </SectionCard>
+                    {metrics && <MetricTable counterpart={counterpart} run={run} />}
                   </>
                 )}
-              </>
-            )
+              </Panel>
+
+              {run.scenario_results && (
+                <Panel eyebrow="Prediction against Ground Truth" title="Per scenario">
+                  <ScenarioTable run={run} />
+                </Panel>
+              )}
+
+              {run.badcases && run.badcases.length > 0 && (
+                <Panel eyebrow="Every failure the scorer recorded" title="Badcases">
+                  <ul className="divide-y divide-rule">
+                    {run.badcases.map((entry, index) => {
+                      const badcase = entry as {
+                        scenario_kind?: string;
+                        categories?: string[];
+                        summary?: string;
+                      };
+                      return (
+                        <li className="py-2.5" key={`${badcase.scenario_kind}-${index}`}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-[11px] text-ink">
+                              {badcase.scenario_kind ?? "unknown"}
+                            </span>
+                            {(badcase.categories ?? []).map((category) => (
+                              <span
+                                className="rounded-[2px] border border-partial/35 bg-partial-soft px-1.5 py-0.5 font-mono text-[10px] text-partial"
+                                key={category}
+                              >
+                                {category}
+                              </span>
+                            ))}
+                          </div>
+                          {badcase.summary && (
+                            <p className="mt-1 text-[11px] text-ink-3">
+                              {badcase.summary}
+                            </p>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </Panel>
+              )}
+            </>
           )}
         </div>
       </div>
-
-      {run?.scenario_results && (
-        <SectionCard eyebrow="Prediction vs Ground Truth" title="Scenario comparison">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
-              <thead className="border-b border-slate-200 bg-slate-50/80 text-[10px] uppercase tracking-[0.14em] text-slate-400">
-                <tr>
-                  <th className="px-4 py-3 font-semibold">Scenario</th>
-                  <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold">Execution</th>
-                  <th className="px-4 py-3 font-semibold">Predicted findings</th>
-                  <th className="px-4 py-3 font-semibold">Expected findings</th>
-                  <th className="px-4 py-3 font-semibold">F1</th>
-                  <th className="px-4 py-3 font-semibold">Badcases</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {run.scenario_results.map((result) => {
-                  const predicted = scenarioLabels(result, true);
-                  const expected = scenarioLabels(result, false);
-                  return (
-                    <tr
-                      className="align-top transition-colors duration-150 hover:bg-blue-50/40"
-                      key={result.scenario_id}
-                    >
-                      <td className="px-4 py-4">
-                        <div className="font-semibold text-slate-900">
-                          {humanize(result.scenario_kind)}
-                        </div>
-                        <div className="mt-1 font-mono text-[10px] text-slate-400">
-                          {result.scenario_id}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <StatusBadge status={result.diagnosis_status} />
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="max-w-44 text-xs font-medium text-slate-700">
-                          {result.adapter_name || "Not recorded"}
-                        </div>
-                        {result.fallback_used && (
-                          <div className="mt-1 font-mono text-[10px] text-amber-700">
-                            {result.fallback_reason || "FALLBACK"}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex max-w-xs flex-wrap gap-1.5">
-                          {predicted.length === 0 ? (
-                            <span className="text-xs text-slate-400">None</span>
-                          ) : (
-                            predicted.map((item) => (
-                              <span
-                                className="rounded-md bg-blue-50 px-2 py-1 text-[10px] text-blue-800"
-                                key={item}
-                              >
-                                {humanize(item)}
-                              </span>
-                            ))
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex max-w-xs flex-wrap gap-1.5">
-                          {expected.length === 0 ? (
-                            <span className="text-xs text-slate-400">None</span>
-                          ) : (
-                            expected.map((item) => (
-                              <span
-                                className="rounded-md bg-slate-100 px-2 py-1 text-[10px] text-slate-700"
-                                key={item}
-                              >
-                                {humanize(item)}
-                              </span>
-                            ))
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 font-mono text-xs text-slate-700">
-                        {result.root_cause_f1 == null ? "—" : result.root_cause_f1.toFixed(3)}
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="flex max-w-xs flex-wrap gap-1.5">
-                          {(result.badcases ?? []).length === 0 ? (
-                            <span className="text-xs text-emerald-700">Clean</span>
-                          ) : (
-                            result.badcases?.map((badcase) => (
-                              <span
-                                className="rounded-md bg-red-50 px-2 py-1 text-[10px] text-red-700"
-                                key={badcase}
-                              >
-                                {humanize(badcase)}
-                              </span>
-                            ))
-                          )}
-                        </div>
-                        {result.report_summary && (
-                          <p className="mt-2 max-w-xs text-xs text-slate-500">
-                            {result.report_summary}
-                          </p>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </SectionCard>
-      )}
-
-      {run?.badcases && run.badcases.length > 0 && (
-        <SectionCard eyebrow="Failure triage" title="Badcase index">
-          <div className="space-y-3">
-            {run.badcases.map((raw, index) => {
-              const badcase = asBadcase(raw);
-              return (
-                <div
-                  className="rounded-lg border border-red-100 bg-red-50/50 p-4"
-                  key={`${badcase.scenario_kind ?? "badcase"}-${index}`}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-red-900">
-                      {humanize(badcase.scenario_kind)}
-                    </span>
-                    {badcase.categories?.map((category) => (
-                      <span
-                        className="rounded-md bg-white px-2 py-1 font-mono text-[10px] text-red-700"
-                        key={category}
-                      >
-                        {category}
-                      </span>
-                    ))}
-                  </div>
-                  {badcase.summary && (
-                    <p className="mt-2 text-sm text-red-800/80">{badcase.summary}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </SectionCard>
-      )}
-
-      <SectionCard eyebrow="Recent runs" title="Evaluation history">
-        {recentRuns.isLoading ? (
-          <p className="text-sm text-slate-500">Loading evaluation history…</p>
-        ) : recentRuns.isError ? (
-          <ErrorState
-            message={recentRuns.error.detail}
-            onRetry={() => void recentRuns.refetch()}
-          />
-        ) : recentRuns.data?.items.length ? (
-          <div className="divide-y divide-slate-100">
-            {recentRuns.data.items.map((item) => (
-              <button
-                className="flex w-full cursor-pointer items-center gap-3 py-3 text-left transition-colors duration-150 hover:bg-blue-50/50 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                key={item.id}
-                onClick={() => setRunId(item.id)}
-                type="button"
-              >
-                <StatusBadge status={item.status} />
-                <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
-                  {item.model_mode}
-                </span>
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-600">
-                  {item.id}
-                </span>
-                <span className="text-xs text-slate-400">{item.scenario_count} scenarios</span>
-                <span className="text-xs text-slate-400">
-                  {item.created_at.slice(0, 16).replace("T", " ")}
-                </span>
-                <Icon name="arrow-right" size={15} />
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-slate-500">
-            No evaluation runs yet. Run B0 for a deterministic baseline.
-          </p>
-        )}
-      </SectionCard>
     </div>
+  );
+}
+
+function MetricTable({ run, counterpart }: { run: Run; counterpart?: EvaluationList["items"][number] }) {
+  const metrics = run.metrics!;
+  const other = counterpart?.metrics ?? null;
+
+  return (
+    <div>
+      <div className="grid grid-cols-[minmax(150px,1.4fr)_72px_72px_72px] items-center gap-x-4 border-b border-rule pb-2 sm:grid-cols-[minmax(180px,1.6fr)_80px_80px_80px]">
+        <span className="eyebrow">Metric</span>
+        <span className="eyebrow text-right">{run.model_mode}</span>
+        <span className="eyebrow text-right">
+          {counterpart ? counterpart.model_mode : "—"}
+        </span>
+        <span className="eyebrow text-right">Δ</span>
+      </div>
+
+      <div className="divide-y divide-rule">
+        {METRIC_ROWS.map((row) => {
+          const value = metrics[row.key] as number | null | undefined;
+          const otherValue = other ? (other[row.key] as number | null | undefined) : null;
+          const delta =
+            value != null && otherValue != null ? value - otherValue : null;
+          const better =
+            delta != null && Math.abs(delta) > 1e-9
+              ? row.higherIsBetter
+                ? delta > 0
+                : delta < 0
+              : null;
+
+          return (
+            <div
+              className="grid grid-cols-[minmax(150px,1.4fr)_72px_72px_72px] items-baseline gap-x-4 py-2.5 sm:grid-cols-[minmax(180px,1.6fr)_80px_80px_80px]"
+              key={String(row.key)}
+            >
+              <span className="min-w-0">
+                <span className="block text-[12px] text-ink">{row.label}</span>
+                <span className="mt-0.5 block text-[10px] leading-4 text-ink-3">
+                  {row.note}
+                </span>
+              </span>
+              <span className="tnum text-right font-mono text-[12px] font-semibold text-ink">
+                {value == null ? "—" : row.format(value)}
+              </span>
+              <span className="tnum text-right font-mono text-[12px] text-ink-3">
+                {otherValue == null ? "—" : row.format(otherValue)}
+              </span>
+              <span
+                className={`tnum text-right font-mono text-[11px] ${
+                  better === true
+                    ? "text-settled"
+                    : better === false
+                      ? "text-partial"
+                      : "text-ink-3"
+                }`}
+              >
+                {delta == null
+                  ? "—"
+                  : `${delta > 0 ? "+" : "−"}${row.format(Math.abs(delta))}`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {!counterpart && (
+        <p className="mt-3 border-t border-rule pt-3 text-[11px] leading-5 text-ink-3">
+          Run the same seed in another mode and its column will fill in here —
+          that comparison is the one worth showing, not the absolute values.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ScenarioTable({ run }: { run: Run }) {
+  const results = run.scenario_results ?? [];
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[820px] text-left">
+        <thead>
+          <tr className="border-b border-rule">
+            <th className="eyebrow py-2 font-semibold">Scenario</th>
+            <th className="eyebrow py-2 font-semibold">Status</th>
+            <th className="eyebrow py-2 font-semibold">Evidence gathered by</th>
+            <th className="eyebrow py-2 text-right font-semibold">Calls</th>
+            <th className="eyebrow py-2 text-right font-semibold">Stage</th>
+            <th className="eyebrow py-2 text-right font-semibold">F1</th>
+            <th className="eyebrow py-2 text-right font-semibold">Loss err.</th>
+            <th className="eyebrow py-2 font-semibold">Badcases</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-rule">
+          {results.map((result) => (
+            <tr key={result.scenario_id}>
+              <td className="py-2.5">
+                <span className="text-[12px] text-ink">
+                  {humanize(result.scenario_kind)}
+                </span>
+              </td>
+              <td className="py-2.5">
+                <RunStatus status={result.diagnosis_status} />
+              </td>
+              <td className="py-2.5">
+                {/* B2's report is written by the rule adapter even when the
+                    investigation used a model, so show which policy ran. */}
+                <span className="text-[11px] text-ink-2">
+                  {gatheredBy(result)}
+                </span>
+                {result.fallback_used && (
+                  <span className="mt-0.5 block font-mono text-[10px] text-partial">
+                    {result.fallback_reason ?? "FALLBACK"}
+                  </span>
+                )}
+              </td>
+              <td className="tnum py-2.5 text-right font-mono text-[11px] text-ink-2">
+                {result.tool_call_count ?? "—"}
+              </td>
+              <td className="py-2.5 text-right">
+                <StageMark value={result.stage_exact} />
+              </td>
+              <td className="tnum py-2.5 text-right font-mono text-[11px] text-ink-2">
+                {result.root_cause_f1?.toFixed(2) ?? "—"}
+              </td>
+              <td className="tnum py-2.5 text-right font-mono text-[11px] text-ink-2">
+                {result.loss_attribution_rel_error == null
+                  ? "—"
+                  : formatPercent(result.loss_attribution_rel_error)}
+              </td>
+              <td className="py-2.5">
+                {(result.badcases ?? []).length === 0 ? (
+                  <span className="text-[11px] text-ink-3">none</span>
+                ) : (
+                  <span className="font-mono text-[10px] text-partial">
+                    {(result.badcases ?? []).join(", ")}
+                  </span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function StageMark({ value }: { value: boolean | null | undefined }) {
+  if (value == null) return <span className="text-[11px] text-ink-3">—</span>;
+  return (
+    <span
+      className={`font-mono text-[11px] ${value ? "text-settled" : "text-partial"}`}
+      title={value ? "Predicted stages match Ground Truth" : "Stage prediction differs from Ground Truth"}
+    >
+      {value ? "match" : "differ"}
+    </span>
   );
 }

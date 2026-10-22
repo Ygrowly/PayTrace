@@ -43,6 +43,9 @@ class DiagnosisRun(Base):
     model_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ontology_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Which evidence-gathering mode produced this run: B0 fixed pipeline,
+    # B2 governed investigation. Null for runs predating the harness.
+    agent_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     attempt_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     celery_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

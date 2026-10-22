@@ -405,8 +405,8 @@ export interface components {
             evidence_validity_rate_mean: number;
             /** Unsupported Claim Rate Mean */
             unsupported_claim_rate_mean: number;
-            /** Loss Attribution Mae */
-            loss_attribution_mae?: number | null;
+            /** Loss Attribution Mape */
+            loss_attribution_mape?: number | null;
             /** Tool Call Count Mean */
             tool_call_count_mean?: number | null;
             /** Latency Ms Mean */
@@ -505,6 +505,8 @@ export interface components {
             prompt_version: string | null;
             /** Ontology Version */
             ontology_version: string | null;
+            /** Agent Mode */
+            agent_mode?: string | null;
             /** Attempt Number */
             attempt_number: number;
             /** Celery Task Id */
@@ -584,6 +586,8 @@ export interface components {
             tool_executions: components["schemas"]["ToolExecutionSchema"][];
             /** Evidence */
             evidence: components["schemas"]["EvidenceResponse"][];
+            /** Hypotheses */
+            hypotheses?: components["schemas"]["HypothesisSchema"][];
         };
         /** DimensionDefinition */
         DimensionDefinition: {
@@ -631,7 +635,7 @@ export interface components {
              * @default B0
              * @enum {string}
              */
-            model_mode: "B0" | "B1";
+            model_mode: "B0" | "B1" | "B2";
             /**
              * Prompt Version
              * @default rule-based.v1
@@ -775,7 +779,7 @@ export interface components {
          * @description Kinds of deterministic evidence a tool may produce.
          * @enum {string}
          */
-        EvidenceType: "FUNNEL_STAGE_DEGRADATION" | "DIMENSION_CONTRIBUTION" | "BENEFIT_GAP_FRICTION" | "CHANNEL_TIMEOUT" | "ERROR_CODE_CONCENTRATION" | "DATA_GAP" | "CANCEL_REORDER_FLOW" | "CONFIG_CHANGE";
+        EvidenceType: "FUNNEL_STAGE_DEGRADATION" | "FUNNEL_BASELINE_STABLE" | "DIMENSION_CONTRIBUTION" | "BENEFIT_GAP_FRICTION" | "CHANNEL_TIMEOUT" | "ERROR_CODE_CONCENTRATION" | "DATA_GAP" | "CANCEL_REORDER_FLOW" | "CONFIG_CHANGE";
         /** EvidenceTypeDefinition */
         EvidenceTypeDefinition: {
             evidence_type: components["schemas"]["EvidenceType"];
@@ -821,6 +825,10 @@ export interface components {
             incident_overall_rate: number;
             /** Rate Delta */
             rate_delta: number;
+            /** Baseline Step Rate */
+            baseline_step_rate?: number | null;
+            /** Incident Step Rate */
+            incident_step_rate?: number | null;
             /** Estimated Lost Intents */
             estimated_lost_intents: number;
         };
@@ -839,6 +847,37 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HypothesisSchema
+         * @description One node of a B2 run's investigation ledger (notes § 8.5).
+         */
+        HypothesisSchema: {
+            /** Hypothesis Id */
+            hypothesis_id: string;
+            /** Root Cause Type */
+            root_cause_type: string;
+            /** Proposed Scope */
+            proposed_scope: {
+                [key: string]: unknown;
+            } | null;
+            /** Supporting Evidence */
+            supporting_evidence: string[] | null;
+            /** Conflicting Evidence */
+            conflicting_evidence: string[] | null;
+            /** Alternative Explanations */
+            alternative_explanations: string[] | null;
+            /** Required Next Tool */
+            required_next_tool: string | null;
+            /** Status */
+            status: string;
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * IncidentCreate
@@ -950,6 +989,28 @@ export interface components {
             latest_diagnosis_run_id?: string | null;
             /** Latest Diagnosis Status */
             latest_diagnosis_status?: string | null;
+            /** Latest Lost Intents */
+            latest_lost_intents?: number | null;
+            /** Latest Root Causes */
+            latest_root_causes?: components["schemas"]["IncidentRootCauseSummary"][];
+        };
+        /**
+         * IncidentRootCauseSummary
+         * @description The headline of one claim, for list views.
+         *
+         *     The full claim (explanation, citations, alternatives) lives in the report;
+         *     this is only what a reader needs to tell two incidents apart at a glance.
+         */
+        IncidentRootCauseSummary: {
+            /** Label */
+            label: string;
+            /**
+             * Support Status
+             * @enum {string}
+             */
+            support_status: "SUPPORTED" | "PARTIAL" | "UNKNOWN";
+            /** Estimated Lost Intents */
+            estimated_lost_intents: number | null;
         };
         /** LinkDefinition */
         LinkDefinition: {
@@ -1124,6 +1185,12 @@ export interface components {
             evidence_codes: string[];
             /** Rank */
             rank: number;
+            /**
+             * Support Status
+             * @default SUPPORTED
+             * @enum {string}
+             */
+            support_status: "SUPPORTED" | "PARTIAL" | "UNKNOWN";
         };
         /**
          * ScenarioResult
@@ -1162,8 +1229,8 @@ export interface components {
             evidence_validity_rate?: number | null;
             /** Unsupported Claim Rate */
             unsupported_claim_rate?: number | null;
-            /** Loss Attribution Abs Error */
-            loss_attribution_abs_error?: number | null;
+            /** Loss Attribution Rel Error */
+            loss_attribution_rel_error?: number | null;
             /** Tool Call Count */
             tool_call_count?: number | null;
             /** Latency Ms */
@@ -1178,6 +1245,13 @@ export interface components {
             adapter_name?: string | null;
             /** Model Name */
             model_name?: string | null;
+            /**
+             * Agent Mode
+             * @default B0
+             */
+            agent_mode: string;
+            /** Policy Name */
+            policy_name?: string | null;
             /**
              * Fallback Used
              * @default false
@@ -1197,6 +1271,8 @@ export interface components {
             tool_trace?: {
                 [key: string]: unknown;
             }[];
+            /** Validation Issue Codes */
+            validation_issue_codes?: string[];
             /** Badcases */
             badcases?: ("STAGE_MISS" | "STAGE_FALSE_POSITIVE" | "ROOT_CAUSE_MISS" | "ROOT_CAUSE_FALSE_POSITIVE" | "UNSUPPORTED_CLAIM" | "LOSS_ATTRIBUTION_ERROR" | "RUN_FAILURE" | "DATA_GAP_MISS")[];
         };

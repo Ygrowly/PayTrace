@@ -28,7 +28,7 @@ def _report(seed: int, f1: float, badcases: list[dict] | None = None) -> Evaluat
             root_cause_f1_mean=f1,
             evidence_validity_rate_mean=1.0,
             unsupported_claim_rate_mean=0.0,
-            loss_attribution_mae=None,
+            loss_attribution_mape=None,
             tool_call_count_mean=6.0,
             latency_ms_mean=10.0,
             badcase_count=len(badcases or []),
@@ -58,7 +58,7 @@ def test_summarize_reports_exposes_distribution_and_badcases():
         "min": 0.8,
         "max": 1.0,
     }
-    assert "loss_attribution_mae" not in summary["metrics"]
+    assert "loss_attribution_mape" not in summary["metrics"]
     assert summary["badcase_categories"] == {"STAGE_MISS": 1}
     assert summary["badcase_scenarios"] == {"normal": 1}
     markdown = render_markdown(summary)

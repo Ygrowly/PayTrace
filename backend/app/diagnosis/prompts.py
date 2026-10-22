@@ -40,7 +40,14 @@ DIAGNOSIS_SYSTEM_PROMPT_V1 = (
     "   reliable diagnosis, set status=NEEDS_DATA, populate missing_data, and\n"
     "   use empty root_causes list.\n"
     "10. Normal: When no significant evidence of anomaly exists, use\n"
-    "    NORMAL_PAYMENT_FAILURE with LOW confidence and 0 lost intents.\n"
+    "    NORMAL_PAYMENT_FAILURE with LOW confidence and 0 lost intents, and\n"
+    "    cite the FUNNEL_BASELINE_STABLE evidence that shows no stage degraded.\n"
+    "11. Support status per root cause:\n"
+    "    SUPPORTED — at least one evidence type specific to this cause\n"
+    "    PARTIAL   — only observational or directional evidence\n"
+    "    UNKNOWN   — you cannot attribute this at all\n"
+    "    A claim marked UNKNOWN must not be counted in explained_lost_intents.\n"
+    "    The system recomputes this field; declaring SUPPORTED does not make it so.\n"
 )
 
 DIAGNOSIS_USER_PROMPT_V1 = (

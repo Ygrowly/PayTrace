@@ -14,6 +14,11 @@ from app.diagnosis.report import DiagnosisReport
 from app.diagnosis.validator import ValidationIssue
 from app.evaluation.models import AggregateMetrics, BadcaseCategory, ScenarioResult
 from app.harness.scenarios.ground_truth import GroundTruth
+from app.tools.base import Evidence, ToolResult
+
+# Relative loss-attribution error above which a scenario is flagged as a
+# material misestimate rather than routine estimation drift.
+_LOSS_ERROR_BADGE_THRESHOLD = 0.25
 
 
 def _jaccard(predicted: set[str], expected: set[str]) -> float:
@@ -48,12 +53,18 @@ def score_scenario(
     validation_issues: Sequence[ValidationIssue] = (),
     diagnosis_status: str = "SUCCEEDED",
     latency_ms: int | None = None,
+    run_evidence: Sequence[Evidence] = (),
+    tool_results: Sequence[ToolResult] = (),
 ) -> ScenarioResult:
     """Score one scenario's diagnosis report against its Ground Truth.
 
     ``report=None`` means the diagnosis run failed before producing a report;
     the result then only counts toward run_success_rate and carries a
     RUN_FAILURE badcase.
+
+    ``run_evidence`` is the run's evidence ledger and ``tool_results`` its tool
+    trace; together they check that a cited code exists *and* came from a tool
+    call that actually succeeded.
     """
     expected_stages = set(ground_truth.expected_anomalous_stages)
     expected_causes = set(ground_truth.expected_root_causes)
@@ -86,6 +97,7 @@ def score_scenario(
     base.fallback_reason = report.fallback_reason
     base.input_tokens = report.input_tokens
     base.output_tokens = report.output_tokens
+    base.validation_issue_codes = sorted({i.code for i in validation_issues})
 
     # A NEEDS_DATA report is a valid safety outcome for a data-gap scenario;
     # it must not be scored as a root-cause miss before the missing data is
@@ -106,35 +118,49 @@ def score_scenario(
         base.root_cause_f1 = f1
 
     # --- Evidence validity & unsupported claims -----------------------------
-    # Evidence validity: fraction of cited evidence codes that the validator
-    # did NOT flag as bad references / unsupported. Unsupported claim rate:
-    # fraction of root causes flagged R3_NO_EVIDENCE or R10_HIGH_CONF_NO_EV.
+    # Evidence validity: fraction of cited codes that are both registered in
+    # this run AND produced by a tool call that actually succeeded. A code from
+    # a partial/failed call is a citation the system cannot stand behind.
+    # Unsupported claim rate: fraction of claims published as UNKNOWN, i.e.
+    # claims the evidence contract could not carry. Counted per claim — the
+    # former issue-counting version double-counted a single claim that tripped
+    # more than one rule.
     total_causes = len(report.root_causes)
-    unsupported_causes = sum(
-        1 for i in validation_issues if i.code in {"R3_NO_EVIDENCE", "R10_HIGH_CONF_NO_EV"}
-    )
+    unsupported_causes = sum(1 for rc in report.root_causes if rc.support_status == "UNKNOWN")
     base.unsupported_claim_rate = (
         ((unsupported_causes / total_causes) if total_causes else 0.0)
         if not is_needs_data
         else None
     )
 
-    total_cited = sum(len(rc.evidence_codes) for rc in report.root_causes)
-    bad_refs = sum(1 for i in validation_issues if i.code == "R2_BAD_EVIDENCE_REF")
+    successful_calls = {r.tool_call_id for r in tool_results if r.status == "success"}
+    cited = [code for rc in report.root_causes for code in rc.evidence_codes]
+    total_cited = len(cited)
+    if total_cited and run_evidence and successful_calls:
+        by_code = {e.evidence_code: e for e in run_evidence}
+        citable = sum(
+            1
+            for code in cited
+            if code in by_code and by_code[code].tool_call_id in successful_calls
+        )
+    else:
+        # No ledger/trace to check against (direct caller): fall back to
+        # counting citations. The evaluation runner always passes both.
+        citable = total_cited
     base.evidence_validity_rate = (
-        (max(0.0, (total_cited - bad_refs) / total_cited) if total_cited else 1.0)
-        if not is_needs_data
-        else None
+        (citable / total_cited if total_cited else 1.0) if not is_needs_data else None
     )
 
     # --- Loss attribution ----------------------------------------------------
-    # GT does not carry an expected lost-intent figure, so we measure internal
-    # consistency: |estimated - (explained + unexplained)|. A well-formed report
-    # has estimated == explained + unexplained, so error → 0.
+    # Absolute relative error against the injected fault's true impact. The
+    # previous version compared the report against itself
+    # (|total - (explained + unexplained)|), which a well-formed report always
+    # satisfies — it measured formatting, not accuracy.
     if not is_needs_data:
-        estimated = report.total_estimated_lost_intents
-        accounted = report.explained_lost_intents + report.unexplained_lost_intents
-        base.loss_attribution_abs_error = abs(estimated - accounted)
+        expected_lost = ground_truth.expected_lost_intents
+        base.loss_attribution_rel_error = abs(
+            report.total_estimated_lost_intents - expected_lost
+        ) / max(expected_lost, 1)
 
     # --- Tool call count (from distinct tool_call_ids cited in evidence) -----
     # The report does not carry the ledger; approximate via evidence codes,
@@ -153,7 +179,8 @@ def score_scenario(
         badcases.append("ROOT_CAUSE_FALSE_POSITIVE")
     if not is_needs_data and unsupported_causes:
         badcases.append("UNSUPPORTED_CLAIM")
-    if base.loss_attribution_abs_error and base.loss_attribution_abs_error > 0:
+    rel_error = base.loss_attribution_rel_error
+    if rel_error is not None and rel_error > _LOSS_ERROR_BADGE_THRESHOLD:
         badcases.append("LOSS_ATTRIBUTION_ERROR")
 
     def _gap_is_reported(expected_gap: str) -> bool:
@@ -198,16 +225,23 @@ def aggregate(results: Sequence[ScenarioResult]) -> AggregateMetrics:
     ev_rates = [r.evidence_validity_rate for r in scored if r.evidence_validity_rate is not None]
     uc_rates = [r.unsupported_claim_rate for r in scored if r.unsupported_claim_rate is not None]
     loss_errs = [
-        r.loss_attribution_abs_error for r in scored if r.loss_attribution_abs_error is not None
+        r.loss_attribution_rel_error for r in scored if r.loss_attribution_rel_error is not None
     ]
     tool_calls = [r.tool_call_count for r in scored if r.tool_call_count is not None]
     latencies = [r.latency_ms for r in results if r.latency_ms is not None]
     input_tokens = [r.input_tokens for r in results if r.input_tokens is not None]
     output_tokens = [r.output_tokens for r in results if r.output_tokens is not None]
+    # A run counts as a model invocation only when a model was actually
+    # reached: B1 through the report adapter, B2 through the investigation
+    # policy. Fallbacks are counted separately and never as invocations.
     model_invocation_count = sum(
         1
         for r in results
-        if r.adapter_name == "OpenAICompatibleModelAdapter" and not r.fallback_used
+        if not r.fallback_used
+        and (
+            r.adapter_name == "OpenAICompatibleModelAdapter"
+            or r.policy_name == "OpenAIToolCallingPolicy"
+        )
     )
     fallback_count = sum(1 for r in results if r.fallback_used)
 
@@ -224,7 +258,7 @@ def aggregate(results: Sequence[ScenarioResult]) -> AggregateMetrics:
         root_cause_f1_mean=_mean([float(f) for f in f1s]),
         evidence_validity_rate_mean=_mean([float(e) for e in ev_rates]),
         unsupported_claim_rate_mean=_mean([float(u) for u in uc_rates]),
-        loss_attribution_mae=_mean([float(e) for e in loss_errs]) if loss_errs else None,
+        loss_attribution_mape=_mean([float(e) for e in loss_errs]) if loss_errs else None,
         tool_call_count_mean=_mean([float(t) for t in tool_calls]) if tool_calls else None,
         latency_ms_mean=_mean([float(lat) for lat in latencies]) if latencies else None,
         badcase_count=badcase_count,

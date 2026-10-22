@@ -14,12 +14,14 @@ from app.db.models.diagnosis_run import DiagnosisRun
 from app.db.models.diagnosis_run_event import DiagnosisRunEvent
 from app.db.models.evaluation_run import EvaluationRun
 from app.db.models.evidence import EvidenceRecord
+from app.db.models.hypothesis import DiagnosisHypothesis
 from app.db.models.incident import Incident
 from app.db.models.root_cause_finding import RootCauseFinding
 from app.db.models.tool_execution import ToolExecution
 
 __all__ = [
     "ArtifactRecord",
+    "DiagnosisHypothesis",
     "DiagnosisReportRecord",
     "DiagnosisRun",
     "DiagnosisRunEvent",

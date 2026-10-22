@@ -111,6 +111,7 @@ def get_diagnosis_report(
                 explanation=f.explanation,
                 evidence_codes=f.evidence_codes or [],
                 rank=f.rank,
+                support_status=f.support_status,
             )
             for f in findings
         ],
@@ -138,6 +139,7 @@ def get_diagnosis_trace(
         events=events,
         tool_executions=tools,
         evidence=evidence,
+        hypotheses=service.get_hypotheses(db, run_id),
     )
 
 

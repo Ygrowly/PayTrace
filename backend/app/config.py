@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # Diagnostic harness budget (plan § 14.3).
     tool_timeout_seconds: int = 15
     max_tool_calls: int = 8
+    # Evidence-gathering mode for API-triggered runs. B2 is the governed
+    # investigation: it uses the configured model when one is reachable and the
+    # deterministic policy otherwise, recording which actually ran on the run.
+    # B0 keeps the fixed six-tool pipeline. Evaluation has its own ladder.
+    agent_mode: Literal["B0", "B2"] = "B2"
 
     @model_validator(mode="after")
     def reject_insecure_deployment_defaults(self) -> "Settings":

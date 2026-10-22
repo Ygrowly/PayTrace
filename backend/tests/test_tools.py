@@ -143,12 +143,21 @@ def test_evidence_ledger_assigns_unique_codes(registry, datasets):
 # --- get_payment_funnel ----------------------------------------------------------
 
 
-def test_funnel_tool_normal_no_evidence(registry, datasets):
+def test_funnel_tool_normal_raises_negative_evidence(registry, datasets):
+    """A clean scenario still produces evidence: "nothing degraded" is a fact.
+
+    Without it, the no-anomaly conclusion would be the one claim in the report
+    with no system-computed basis, which is what the evidence contract forbids.
+    """
     res = registry.execute(
         "call-0", "get_payment_funnel", ToolPolicy(), dataset_ref=datasets["normal"].path
     )
     assert res.status == "success"
-    assert res.evidence == []
+    assert len(res.evidence) == 1
+    draft = res.evidence[0]
+    assert draft.evidence_type == EvidenceType.FUNNEL_BASELINE_STABLE
+    assert draft.metrics["checked_stages"] > 0
+    assert draft.metrics["baseline_order_confirmed"] > 0
     assert "no anomalous" in res.warnings[0]
 
 

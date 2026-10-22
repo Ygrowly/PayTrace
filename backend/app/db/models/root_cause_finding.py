@@ -25,6 +25,11 @@ class RootCauseFinding(Base):
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_codes: Mapped[list] = mapped_column(JSONB, nullable=False)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    # How well the evidence supports this claim. UNKNOWN claims never account
+    # for explained loss (see ReportValidator R14/R15).
+    support_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="SUPPORTED"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

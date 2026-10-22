@@ -48,11 +48,19 @@ shared analytics/object-storage source before running multiple hosts.
 ## Key boundaries
 
 - **No DB foreign keys** (ADR 0003): Referential integrity is enforced by service-layer code and integration tests.
-- **Ground Truth isolation**: Only `app/evaluation/` and `app/harness/scenarios/ground_truth.py` may import `GroundTruthLoader`. Diagnosis code never touches GT.
+- **Ground Truth isolation**: Only `app/evaluation/` and `app/harness/scenarios/ground_truth.py` may import `GroundTruthLoader`. Diagnosis code never touches GT. This is a module boundary, not a runtime-enforced one — there is no leak detector on the diagnosis path, so an added import would break it silently.
 - **Analytics source abstraction**: Tools depend on `PaymentAnalyticsSource` protocol, never on DuckDB directly.
 - **Model adapter abstraction**: Diagnosis code depends on `ModelAdapter` protocol. `RuleBasedModelAdapter` works without any API key; `OpenAICompatibleModelAdapter` falls back to rules on error.
+- **Harness failure semantics**: before-tool checks that guard cost or scope (bundle, incident scope, schema, budget, rejected hypotheses) **block** the call. Post-tool checks that guard information (missing artifact, truncated rows) **degrade** and let the call through, because the operation has already happened and losing it is a capability loss, not an integrity failure.
 
-## Diagnostic workflow (fixed 6-tool)
+## Diagnostic workflow
+
+Two evidence-gathering modes feed the **same** report step
+(`ContextBuilder → ModelAdapter → ReportValidator`), so comparing them isolates
+how evidence was collected rather than confounding it with how the report was
+written.
+
+**B0 — fixed pipeline**
 
 ```text
 validate_dataset
@@ -62,19 +70,69 @@ validate_dataset
   → trace_cancel_and_reorder
   → get_config_changes
   → breakdown_conversion_loss (per anomalous stage × 2 dimensions)
-  → EvidenceLedger → ContextBuilder → ModelAdapter → ReportValidator
 ```
 
 Max 7 tool calls (5 base + 2 breakdown), within the 8-call budget.
 
+**B2 — Diagnostic Harness**
+
+```text
+get_payment_funnel (triage: scope the incident)
+  → route_capabilities(anomalous stages, data quality) → CapabilityBundle
+  → propose hypotheses (one per routed signal)
+  → loop:
+        policy.decide(state) → next action or finish
+        BEFORE hooks  → capability bundle · incident scope · argument schema
+                        · budget · rejected hypotheses · read-only/dedup
+        (blocked calls are recorded and fed back, bounded at 3)
+        execute tool
+        AFTER hooks   → register evidence · resolve hypothesis
+                        · artifact check (degrades, never blocks)
+                        · early-exit check
+  → EvidenceLedger → ContextBuilder → ModelAdapter → ReportValidator
+```
+
+The policy chooses; the harness decides what is allowed. `dataset_ref` is
+injected by the harness and stripped from any policy-supplied arguments, so a
+model cannot point a tool at another incident's data.
+
+### Investigation ledger
+
+Hypotheses move through `PROPOSED → INVESTIGATING → SUPPORTED / PARTIAL /
+REJECTED / NEEDS_DATA`. A hypothesis may only be **ruled out** by its designated
+probe: a generic drilldown returning nothing proves nothing. A rejected
+hypothesis is not re-investigated without a new tool, and any hypothesis the
+investigation never reached is closed as `NEEDS_DATA` rather than left dangling.
+
+### Evidence contract
+
+`resolve_support_status` is the single implementation of the contract, shared by
+the validator (which detects violations) and the orchestrator (which applies the
+downgrade), so R8 and R14 cannot disagree:
+
+| Evidence available | Verdict |
+| --- | --- |
+| Nothing, or codes absent from this run | `UNKNOWN` |
+| Only negative evidence (`DATA_GAP`, `FUNNEL_BASELINE_STABLE`) for a fault label | `UNKNOWN` |
+| Missing the label's own evidence type (`CHANNEL_TIMEOUT`, `BENEFIT_GAP_FRICTION`) | `UNKNOWN` |
+| One specific type that is observational by design | `PARTIAL` |
+| One or more specific, non-observational types | `SUPPORTED` |
+
+A `NORMAL_PAYMENT_FAILURE` claim is rejected if positive fault evidence exists in
+the same run — "nothing is wrong" is itself a claim that needs support.
+Downgraded claims have their loss moved from `explained` to `unexplained` and
+recorded as `R14_UNSUPPORTED_STATUS` in the trace.
+
 ## Evaluation modes
 
-| Mode | Adapter | Status |
-|------|---------|--------|
-| B0 | RuleBasedModelAdapter | Implemented |
-| B1 | OpenAICompatibleModelAdapter | Implemented (falls back to B0 without key) |
-| B2 | Dynamic tool calling | Not implemented |
-| B3 | Harness + evidence constraints | Not implemented |
+| Mode | Evidence gathering | Report writer | Status |
+|------|--------------------|---------------|--------|
+| B0 | Fixed 6-tool pipeline | `RuleBasedModelAdapter` | Implemented |
+| B1 | Fixed 6-tool pipeline | `OpenAICompatibleModelAdapter` (falls back to rules) | Implemented |
+| B2 | Diagnostic Harness (`OpenAIToolCallingPolicy`, falls back to `ScriptedInvestigationPolicy`) | `RuleBasedModelAdapter` | Implemented |
+
+B2's report is written by the rule adapter on purpose: that holds the report step
+constant against B0 so the comparison isolates the investigation itself.
 
 ## Stale-run recovery (3-layer)
 

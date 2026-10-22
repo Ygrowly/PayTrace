@@ -11,15 +11,15 @@
 | `backend/app/main.py` | FastAPI 应用工厂、Trace ID 中间件、CORS、挂载 v1 Router | `create_app()`、`app.include_router(api_v1_router)` |
 | `backend/app/api/v1/` | HTTP 路由聚合：health、ontology、incidents、diagnosis、evaluations | `backend/app/api/v1/__init__.py` 的 `APIRouter(prefix="/api/v1")` 与 `include_router` |
 | `backend/app/db/` | SQLAlchemy Base、同步 Engine/Session、控制面 ORM | `db/base.py`、`db/session.py`、`db/models/__init__.py` |
-| `backend/migrations/versions/` | Alembic 控制面 Schema，当前链为 `0001` → `0002` → `0003` → `0004` → `0005` | 五个 migration 文件的 `revision`/`down_revision` |
+| `backend/migrations/versions/` | Alembic 控制面 Schema，当前链为 `0001` → `0002` → `0003` → `0004` → `0005` → `0006` | 六个 migration 文件的 `revision`/`down_revision` |
 | `backend/app/incidents/` | Incident/DiagnosisRun Service、状态迁移、幂等创建、报告/Trace 持久化 | `incidents/service.py`、`incidents/schemas.py` |
-| `backend/app/diagnosis/` | 固定诊断编排、Context、ModelAdapter、Report、Validator | `diagnosis/orchestrator.py`、`context.py`、`adapter.py`、`validator.py` |
+| `backend/app/diagnosis/` | 诊断编排（B0 固定流水线 / B2 Harness）、Context、ModelAdapter、Report、证据契约 Validator | `diagnosis/orchestrator.py`、`context.py`、`adapter.py`、`validator.py:classify_support` |
 | `backend/app/domain/` | Canonical Payment Event、漏斗阶段、事件类型/状态/周期 | `domain/events.py:FunnelStage`、`CanonicalPaymentEvent`、`FUNNEL_STAGE_ORDER` |
 | `backend/app/ontology/` | Code-first Ontology 注册表与版本 | `ontology/registry.py:REGISTRY`、`ONTOLOGY_VERSION` |
 | `backend/app/analytics/` | `PaymentAnalyticsSource` 协议与 Parquet/DuckDB 实现 | `analytics/base.py`、`analytics/duckdb_source.py` |
-| `backend/app/harness/` | 确定性场景、Parquet DatasetRef、隔离 Ground Truth、ArtifactStore | `harness/scenarios/`、`harness/artifact_store.py` |
+| `backend/app/harness/` | Diagnostic Harness（能力路由、Hook 链、假设账本、调查策略、驱动循环）、确定性场景、Parquet DatasetRef、隔离 Ground Truth、ArtifactStore | `harness/harness.py`、`routing.py`、`hooks.py`、`ledger.py`、`investigation.py`、`scenarios/`、`artifact_store.py` |
 | `backend/app/tools/` | 六个只读诊断工具（含 `trace_cancel_and_reorder`、`get_config_changes`）、工具注册表、调用预算、EvidenceLedger | `tools/base.py`、`tools/diagnostic.py` |
-| `backend/app/evaluation/` | B0/B1 评测 Runner、指标、报告模型、持久化 Service、API Schema | `evaluation/runner.py`、`metrics.py`、`models.py`、`service.py`、`schemas.py` |
+| `backend/app/evaluation/` | B0/B1/B2 评测 Runner、指标、报告模型、持久化 Service、API Schema | `evaluation/runner.py`、`metrics.py`、`models.py`、`service.py`、`schemas.py` |
 | `backend/app/tasks/` | Celery 应用、heartbeat、诊断任务、评测任务、stale 扫描任务；Beat 每 5 分钟调度 stale-run 恢复 | `tasks/celery_app.py` 的 `include` 列表与四个任务文件、`tasks/stale_scan.py:scan_stale_runs` |
 | `backend/tests/` | 单元、API、PostgreSQL 条件集成、MinIO 条件集成测试 | `pyproject.toml` 的 `testpaths = ["tests"]` 与测试文件集合 |
 | `frontend/app/` | Next.js App Router：首页、Incident 列表/详情、Eval Lab | `app/page.tsx`、`app/incidents/`、`app/eval/page.tsx` |
@@ -59,7 +59,9 @@ Breakdown、Benefit、Payment Event、DatasetValidation 结果模型。
 `backend/app/analytics/duckdb_source.py` 从 Parquet 建立进程内 DuckDB 连接，
 执行漏斗、维度拆解、优惠差异、支付事件和数据质量查询。
 
-`backend/app/diagnosis/orchestrator.py` 的固定执行顺序是：
+`backend/app/diagnosis/orchestrator.py` 有两种取证方式，之后共用同一条收尾链路：
+
+**B0（`agent_mode="B0"`）固定执行顺序**
 
 1. `validate_dataset()`；
 2. 固定 6 工具流水线：`get_payment_funnel` → `analyze_benefit_gap` →
@@ -68,6 +70,21 @@ Breakdown、Benefit、Payment Event、DatasetValidation 结果模型。
    `breakdown_conversion_loss`；
 3. `ContextBuilder` 组装证据摘要；
 4. `ModelAdapter` 生成报告，`ReportValidator` 校验并最多做一次修正重试。
+
+**B2（`agent_mode="B2"`）受治理调查**
+
+1. `get_payment_funnel` 做 triage，固定 incident 范围；
+2. `route_capabilities()` 按信号生成受限 capability bundle；
+3. 按信号提出假设，进入循环：`policy.decide()` 决定下一步 →
+   Before Hook 链校验（bundle / incident scope / 参数 schema / 预算 /
+   已否决假设 / 只读去重），被阻断的调用记录后回灌，最多 3 次 →
+   执行工具 → After Hook 链（登记证据、结算假设、artifact 降级检查、
+   Early-Exit 判定）；
+4. 结束后把未触及的假设结为 `NEEDS_DATA`；
+5. 同样进入 `ContextBuilder` → `ModelAdapter` → `ReportValidator`。
+
+`dataset_ref` 由 harness 注入，并从策略提供的参数中剔除，模型无法把工具指向
+其他 incident 的数据。应用默认模式由 `AGENT_MODE` 控制（默认 `B2`）。
 
 工具只接收 `PaymentAnalyticsSource`，系统生成 `EvidenceLedger` 编号；在调用方
 传入 `ArtifactStore` 时，完整工具结果可外置存储，控制面只持久化元数据和引用。

@@ -19,7 +19,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-API_URL = os.getenv("E2E_API_URL", "http://localhost:8000")
+# 127.0.0.1 rather than "localhost": the API binds IPv4, and where another
+# stack publishes the IPv6 side of the same port, "localhost" resolves to that
+# one and the reachability probe passes against the wrong service.
+API_URL = os.getenv("E2E_API_URL", "http://127.0.0.1:8000")
 WEB_URL = os.getenv("E2E_WEB_URL", "http://localhost:3000")
 
 # Common Windows Chrome/Edge locations. browser-use's auto-detection can

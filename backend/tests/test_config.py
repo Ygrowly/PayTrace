@@ -51,3 +51,14 @@ def test_production_configuration_rejects_insecure_defaults(override, message): 
 def test_staging_uses_the_same_safety_gate():
     with pytest.raises(ValidationError, match="ARTIFACT_STORE_BACKEND"):
         _production_settings(app_env="staging", artifact_store_backend="local")
+
+
+def test_agent_mode_defaults_to_the_governed_investigation():
+    """API-triggered runs default to B2; B0 remains selectable as the baseline."""
+    assert Settings(_env_file=None).agent_mode == "B2"
+    assert Settings(_env_file=None, agent_mode="B0").agent_mode == "B0"
+
+
+def test_agent_mode_rejects_a_mode_outside_the_ladder():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, agent_mode="B9")

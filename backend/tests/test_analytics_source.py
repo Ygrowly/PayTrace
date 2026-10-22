@@ -214,3 +214,74 @@ def test_config_changes_data_gap_returns_empty(source, datasets):
 def test_validate_dataset_missing_file(source):
     with pytest.raises(FileNotFoundError):
         source.validate_dataset("does/not/exist.parquet")
+
+
+# ---------------------------------------------------------------------------
+# Loss attribution must not double-count across stages (notes § 6.3)
+# ---------------------------------------------------------------------------
+
+
+def test_stage_loss_bases_are_nested_so_no_intent_is_counted_twice(source, datasets):
+    """Each stage's loss is measured over the incident population that entered it.
+
+    That population is the one which reached the previous stage, so it excludes
+    intents that already dropped out upstream. Estimating every stage from its
+    own overall rate instead charges the same intent again at each downstream
+    stage — the double-count that makes a two-root-cause incident report more
+    loss than it observed.
+    """
+    for kind in ("benefit_friction", "channel_timeout", "mixed_failure"):
+        result = source.get_funnel(FunnelQuery(dataset_ref=datasets[kind].path))
+        incident_counts = {s.stage: s.reached_count for s in result.incident.stages}
+        order = [s.stage for s in result.incident.stages]
+
+        for index, delta in enumerate(result.deltas):
+            if index == 0:
+                assert delta.estimated_lost_intents == 0
+                continue
+            entering = incident_counts[order[index - 1]]
+            assert delta.estimated_lost_intents <= entering, (
+                f"{kind}/{delta.stage}: attributed {delta.estimated_lost_intents} "
+                f"but only {entering} intents entered the transition"
+            )
+
+
+def test_loss_attribution_tracks_the_injected_impact(source, tmp_path):
+    """The attributed loss must land near the fault's true impact.
+
+    This is the end-to-end claim behind the dedup fix: with per-stage overall
+    rates, `mixed_failure` over-attributed by ~38%; with per-transition step
+    rates it lands within a third.
+
+    Measured at 5000 intents on purpose. The estimator extrapolates a rate
+    delta per transition, so its error is sampling noise that accumulates across
+    stages: at 400 intents the total can be off by ~45% even though the
+    estimate is unbiased. Accuracy is a function of scale, and saying so is more
+    useful than picking an intent count where the number looks good.
+    """
+    for kind in ("benefit_friction", "channel_timeout", "mixed_failure"):
+        events, ground_truth = generate_scenario(
+            ScenarioConfig(kind=kind, seed=42, num_intents=5000)
+        )
+        ref = write_dataset(events, tmp_path, kind)
+        result = source.get_funnel(FunnelQuery(dataset_ref=ref.path))
+        attributed = sum(d.estimated_lost_intents for d in result.deltas)
+
+        expected = ground_truth.expected_lost_intents
+        assert expected > 0
+        relative_error = abs(attributed - expected) / expected
+        assert relative_error < 0.35, (
+            f"{kind}: attributed {attributed} vs injected {expected} "
+            f"({relative_error:.0%} error)"
+        )
+
+
+def test_anomalous_stage_carries_the_loss_for_a_single_fault(source, datasets):
+    """The stage whose transition broke should carry essentially all the loss."""
+    channel = source.get_funnel(FunnelQuery(dataset_ref=datasets["channel_timeout"].path))
+    by_stage = {d.stage: d.estimated_lost_intents for d in channel.deltas}
+    assert "CHANNEL_SUCCEEDED" in channel.anomalous_stages
+    assert by_stage["CHANNEL_SUCCEEDED"] > 0
+    # The loss belongs to the transition into the channel stage, not to stages
+    # downstream of it that the same intents never reached.
+    assert by_stage["CHANNEL_SUCCEEDED"] >= by_stage["PAYMENT_COMPLETED"]

@@ -63,6 +63,7 @@ class EvidenceType(StrEnum):
     """Kinds of deterministic evidence a tool may produce."""
 
     FUNNEL_STAGE_DEGRADATION = "FUNNEL_STAGE_DEGRADATION"
+    FUNNEL_BASELINE_STABLE = "FUNNEL_BASELINE_STABLE"
     DIMENSION_CONTRIBUTION = "DIMENSION_CONTRIBUTION"
     BENEFIT_GAP_FRICTION = "BENEFIT_GAP_FRICTION"
     CHANNEL_TIMEOUT = "CHANNEL_TIMEOUT"
@@ -293,6 +294,13 @@ _EVIDENCE_TYPES: list[EvidenceTypeDefinition] = [
     EvidenceTypeDefinition(
         evidence_type=EvidenceType.FUNNEL_STAGE_DEGRADATION,
         description="A funnel stage degraded vs baseline.",
+    ),
+    EvidenceTypeDefinition(
+        evidence_type=EvidenceType.FUNNEL_BASELINE_STABLE,
+        description=(
+            "No funnel stage degraded vs baseline. Negative evidence: it supports a "
+            "'no anomaly' conclusion but cannot support a positive root-cause claim."
+        ),
     ),
     EvidenceTypeDefinition(
         evidence_type=EvidenceType.DIMENSION_CONTRIBUTION,

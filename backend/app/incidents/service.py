@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     ArtifactRecord,
+    DiagnosisHypothesis,
     DiagnosisReportRecord,
     DiagnosisRun,
     DiagnosisRunEvent,
@@ -27,6 +29,7 @@ from app.db.models import (
 )
 from app.diagnosis.orchestrator import DiagnosisExecution
 from app.diagnosis.report import DiagnosisReport
+from app.harness.ledger import Hypothesis
 
 logger = logging.getLogger(__name__)
 
@@ -312,11 +315,83 @@ def persist_report(
             explanation=rc.explanation,
             evidence_codes=rc.evidence_codes,
             rank=rc.rank,
+            support_status=rc.support_status,
         )
         db.add(finding)
 
     db.flush()
     return report_orm
+
+
+def persist_hypotheses(
+    db: Session,
+    *,
+    run_id: uuid.UUID,
+    hypotheses: Sequence[Hypothesis],
+) -> list[DiagnosisHypothesis]:
+    """Persist the investigation ledger for a run.
+
+    Called for B2 runs. A B0 run has no ledger, so an empty sequence is a
+    legitimate outcome rather than an error.
+    """
+    _require_run(db, run_id)
+    records: list[DiagnosisHypothesis] = []
+    for hypothesis in hypotheses:
+        loss_range = hypothesis.estimated_loss_range
+        record = DiagnosisHypothesis(
+            id=uuid.uuid4(),
+            diagnosis_run_id=run_id,
+            hypothesis_id=hypothesis.hypothesis_id,
+            root_cause_type=hypothesis.root_cause_type,
+            proposed_scope=hypothesis.proposed_scope or None,
+            supporting_evidence=hypothesis.supporting_evidence or None,
+            conflicting_evidence=hypothesis.conflicting_evidence or None,
+            alternative_explanations=hypothesis.alternative_explanations or None,
+            required_next_tool=hypothesis.required_next_tool,
+            status=hypothesis.status,
+            estimated_loss_min=loss_range[0] if loss_range else None,
+            estimated_loss_max=loss_range[1] if loss_range else None,
+            rejection_reason=hypothesis.rejection_reason,
+        )
+        db.add(record)
+        records.append(record)
+    db.flush()
+    return records
+
+
+def get_report_headline(
+    db: Session, run_id: uuid.UUID
+) -> tuple[int | None, list[RootCauseFinding]]:
+    """Total loss and ranked claims for a run, for list views.
+
+    Returns ``(None, [])`` when the run has no report yet, which is the normal
+    state for a queued or failed run — the caller must not read that as "zero
+    lost".
+    """
+    record = (
+        db.query(DiagnosisReportRecord)
+        .filter(DiagnosisReportRecord.diagnosis_run_id == run_id)
+        .first()
+    )
+    if record is None:
+        return None, []
+    findings = (
+        db.query(RootCauseFinding)
+        .filter(RootCauseFinding.diagnosis_report_id == record.id)
+        .order_by(RootCauseFinding.rank)
+        .all()
+    )
+    return record.total_estimated_lost_intents, findings
+
+
+def get_hypotheses(db: Session, run_id: uuid.UUID) -> list[DiagnosisHypothesis]:
+    """Retrieve a run's investigation ledger, in the order it was raised."""
+    return (
+        db.query(DiagnosisHypothesis)
+        .filter(DiagnosisHypothesis.diagnosis_run_id == run_id)
+        .order_by(DiagnosisHypothesis.hypothesis_id)
+        .all()
+    )
 
 
 def get_report(
@@ -430,6 +505,22 @@ def persist_execution_trace(
         )
 
 
+def _tool_execution_order(execution: ToolExecution) -> tuple[int, str]:
+    """Sort key restoring the order tools actually ran in.
+
+    ``tool_executions`` has no sequence column, so ordering by ``id`` returns
+    random UUID order and the trace reads as noise. The call id is assigned
+    sequentially by the orchestrator/harness (``c0``, ``c1``, …), so its numeric
+    suffix is the execution order. A non-numeric id sorts last rather than
+    raising.
+
+    The durable fix is a sequence column on the table; this is correct for the
+    call budget in force (< 10 calls) and costs nothing.
+    """
+    digits = "".join(character for character in execution.tool_call_id if character.isdigit())
+    return (int(digits) if digits else 10**6, execution.tool_call_id)
+
+
 def get_trace(
     db: Session, run_id: uuid.UUID
 ) -> tuple[list[DiagnosisRunEvent], list[ToolExecution], list[EvidenceRecord]]:
@@ -440,12 +531,8 @@ def get_trace(
         .order_by(DiagnosisRunEvent.sequence)
         .all()
     )
-    tools = (
-        db.query(ToolExecution)
-        .filter(ToolExecution.diagnosis_run_id == run_id)
-        .order_by(ToolExecution.id)
-        .all()
-    )
+    tools = db.query(ToolExecution).filter(ToolExecution.diagnosis_run_id == run_id).all()
+    tools.sort(key=_tool_execution_order)
     evidence = (
         db.query(EvidenceRecord)
         .filter(EvidenceRecord.diagnosis_run_id == run_id)

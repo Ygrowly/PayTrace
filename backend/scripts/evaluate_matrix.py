@@ -27,7 +27,7 @@ _METRIC_FIELDS = (
     "root_cause_f1_mean",
     "evidence_validity_rate_mean",
     "unsupported_claim_rate_mean",
-    "loss_attribution_mae",
+    "loss_attribution_mape",
     "tool_call_count_mean",
     "latency_ms_mean",
     "badcase_count",
@@ -88,7 +88,7 @@ def summarize_reports(reports: list[EvaluationReport]) -> dict:
             badcase_categories.update(str(category) for category in item["categories"])
 
     return {
-        "model_mode": "B0",
+        "model_mode": reports[0].model_mode,
         "seeds": [report.seed for report in reports],
         "seed_count": len(reports),
         "num_intents": reports[0].num_intents,
@@ -103,7 +103,7 @@ def summarize_reports(reports: list[EvaluationReport]) -> dict:
 
 def render_markdown(summary: dict) -> str:
     lines = [
-        "# PayTrace Multi-seed B0 Evaluation",
+        f"# PayTrace Multi-seed {summary['model_mode']} Evaluation",
         "",
         f"- Seeds: `{', '.join(str(seed) for seed in summary['seeds'])}`",
         f"- Intents per scenario: `{summary['num_intents']}`",
@@ -129,19 +129,25 @@ def render_markdown(summary: dict) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run a multi-seed PayTrace B0 evaluation.")
+    parser = argparse.ArgumentParser(description="Run a multi-seed PayTrace evaluation.")
     parser.add_argument("--out", type=Path, default=Path("data/evaluations/matrix"))
     parser.add_argument("--seeds", type=_parse_csv_ints, default=[11, 42, 73])
     parser.add_argument("--scenarios", type=_parse_csv_strings, default=list(SCENARIO_KINDS))
     parser.add_argument("--intents", type=int, default=500)
+    parser.add_argument(
+        "--model-mode",
+        default="B0",
+        choices=["B0", "B1", "B2"],
+        help="B0 fixed pipeline, B1 one-shot model writer, B2 harness investigation.",
+    )
     args = parser.parse_args()
 
     reports: list[EvaluationReport] = []
     for seed in args.seeds:
         run_root = args.out / "runs" / f"seed-{seed}"
         execution = run_evaluation(
-            evaluation_run_id=f"matrix-b0-{seed}",
-            model_mode="B0",
+            evaluation_run_id=f"matrix-{args.model_mode.lower()}-{seed}",
+            model_mode=args.model_mode,
             scenario_kinds=args.scenarios,
             seed=seed,
             num_intents=args.intents,

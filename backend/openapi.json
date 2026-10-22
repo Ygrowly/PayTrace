@@ -1114,7 +1114,7 @@
             "type": "number",
             "title": "Unsupported Claim Rate Mean"
           },
-          "loss_attribution_mae": {
+          "loss_attribution_mape": {
             "anyOf": [
               {
                 "type": "number"
@@ -1123,7 +1123,7 @@
                 "type": "null"
               }
             ],
-            "title": "Loss Attribution Mae"
+            "title": "Loss Attribution Mape"
           },
           "tool_call_count_mean": {
             "anyOf": [
@@ -1410,6 +1410,17 @@
             ],
             "title": "Ontology Version"
           },
+          "agent_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Mode"
+          },
           "attempt_number": {
             "type": "integer",
             "title": "Attempt Number"
@@ -1636,6 +1647,13 @@
             },
             "type": "array",
             "title": "Evidence"
+          },
+          "hypotheses": {
+            "items": {
+              "$ref": "#/components/schemas/HypothesisSchema"
+            },
+            "type": "array",
+            "title": "Hypotheses"
           }
         },
         "type": "object",
@@ -1719,7 +1737,8 @@
             "type": "string",
             "enum": [
               "B0",
-              "B1"
+              "B1",
+              "B2"
             ],
             "title": "Model Mode",
             "default": "B0"
@@ -2145,6 +2164,7 @@
         "type": "string",
         "enum": [
           "FUNNEL_STAGE_DEGRADATION",
+          "FUNNEL_BASELINE_STABLE",
           "DIMENSION_CONTRIBUTION",
           "BENEFIT_GAP_FRICTION",
           "CHANNEL_TIMEOUT",
@@ -2264,6 +2284,28 @@
             "type": "number",
             "title": "Rate Delta"
           },
+          "baseline_step_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline Step Rate"
+          },
+          "incident_step_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Step Rate"
+          },
           "estimated_lost_intents": {
             "type": "integer",
             "title": "Estimated Lost Intents"
@@ -2326,6 +2368,118 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HypothesisSchema": {
+        "properties": {
+          "hypothesis_id": {
+            "type": "string",
+            "title": "Hypothesis Id"
+          },
+          "root_cause_type": {
+            "type": "string",
+            "title": "Root Cause Type"
+          },
+          "proposed_scope": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposed Scope"
+          },
+          "supporting_evidence": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supporting Evidence"
+          },
+          "conflicting_evidence": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflicting Evidence"
+          },
+          "alternative_explanations": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alternative Explanations"
+          },
+          "required_next_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Next Tool"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hypothesis_id",
+          "root_cause_type",
+          "proposed_scope",
+          "supporting_evidence",
+          "conflicting_evidence",
+          "alternative_explanations",
+          "required_next_tool",
+          "status",
+          "rejection_reason",
+          "created_at"
+        ],
+        "title": "HypothesisSchema",
+        "description": "One node of a B2 run's investigation ledger (notes \u00a7 8.5)."
       },
       "IncidentCreate": {
         "properties": {
@@ -2539,6 +2693,24 @@
               }
             ],
             "title": "Latest Diagnosis Status"
+          },
+          "latest_lost_intents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Lost Intents"
+          },
+          "latest_root_causes": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentRootCauseSummary"
+            },
+            "type": "array",
+            "title": "Latest Root Causes"
           }
         },
         "type": "object",
@@ -2562,6 +2734,42 @@
         ],
         "title": "IncidentResponse",
         "description": "GET /incidents, GET /incidents/{id} response."
+      },
+      "IncidentRootCauseSummary": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "support_status": {
+            "type": "string",
+            "enum": [
+              "SUPPORTED",
+              "PARTIAL",
+              "UNKNOWN"
+            ],
+            "title": "Support Status"
+          },
+          "estimated_lost_intents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Lost Intents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "support_status",
+          "estimated_lost_intents"
+        ],
+        "title": "IncidentRootCauseSummary",
+        "description": "The headline of one claim, for list views.\n\nThe full claim (explanation, citations, alternatives) lives in the report;\nthis is only what a reader needs to tell two incidents apart at a glance."
       },
       "LinkDefinition": {
         "properties": {
@@ -2950,6 +3158,16 @@
           "rank": {
             "type": "integer",
             "title": "Rank"
+          },
+          "support_status": {
+            "type": "string",
+            "enum": [
+              "SUPPORTED",
+              "PARTIAL",
+              "UNKNOWN"
+            ],
+            "title": "Support Status",
+            "default": "SUPPORTED"
           }
         },
         "type": "object",
@@ -3097,16 +3315,16 @@
             ],
             "title": "Unsupported Claim Rate"
           },
-          "loss_attribution_abs_error": {
+          "loss_attribution_rel_error": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Loss Attribution Abs Error"
+            "title": "Loss Attribution Rel Error"
           },
           "tool_call_count": {
             "anyOf": [
@@ -3181,6 +3399,22 @@
             ],
             "title": "Model Name"
           },
+          "agent_mode": {
+            "type": "string",
+            "title": "Agent Mode",
+            "default": "B0"
+          },
+          "policy_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Name"
+          },
           "fallback_used": {
             "type": "boolean",
             "title": "Fallback Used",
@@ -3234,6 +3468,13 @@
             },
             "type": "array",
             "title": "Tool Trace"
+          },
+          "validation_issue_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Issue Codes"
           },
           "badcases": {
             "items": {

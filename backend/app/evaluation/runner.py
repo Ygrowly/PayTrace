@@ -18,11 +18,12 @@ from pathlib import Path
 from app.analytics.duckdb_source import DuckDBAnalyticsSource
 from app.config import get_settings
 from app.diagnosis.adapter import OpenAICompatibleModelAdapter, RuleBasedModelAdapter
-from app.diagnosis.orchestrator import DiagnosisExecution, DiagnosisOrchestrator
+from app.diagnosis.orchestrator import AgentMode, DiagnosisExecution, DiagnosisOrchestrator
 from app.diagnosis.prompts import PROMPT_VERSION
 from app.evaluation.metrics import aggregate, score_scenario
 from app.evaluation.models import EvaluationReport, ScenarioResult
 from app.harness.artifact_store import ArtifactStore
+from app.harness.investigation import OpenAIToolCallingPolicy
 from app.harness.scenarios.generator import (
     ScenarioConfig,
     generate_config_changes,
@@ -67,8 +68,8 @@ def _validate_config(
         raise ValueError("scenario_kinds must contain at least one scenario")
     if num_intents < 1 or num_intents > 10_000:
         raise ValueError("num_intents must be between 1 and 10000")
-    if model_mode not in ("B0", "B1"):
-        raise ValueError("model_mode must be B0 or B1")
+    if model_mode not in ("B0", "B1", "B2"):
+        raise ValueError("model_mode must be B0, B1 or B2")
     # ``seed`` is intentionally not restricted: negative deterministic seeds
     # are valid inputs to Python's random.Random and are useful in experiments.
     _ = seed
@@ -127,8 +128,11 @@ def _score_one(
         validation_issues=execution.validation_issues,
         diagnosis_status=report.status,
         latency_ms=latency_ms,
+        run_evidence=execution.ledger.all(),
+        tool_results=execution.tool_results,
     )
     evidence, trace = _serialize_execution(execution)
+    policy_input, policy_output = execution.input_tokens, execution.output_tokens
     return result.model_copy(
         update={
             "report_summary": report.summary,
@@ -136,15 +140,25 @@ def _score_one(
             "recommended_actions": report.recommended_actions,
             "adapter_name": report.adapter_name,
             "model_name": report.model_name,
-            "fallback_used": report.fallback_used,
-            "fallback_reason": report.fallback_reason,
-            "input_tokens": report.input_tokens,
-            "output_tokens": report.output_tokens,
+            "agent_mode": execution.agent_mode,
+            "policy_name": execution.policy_name,
+            # A run counts as a fallback if either the writer or the
+            # investigator failed to reach its model.
+            "fallback_used": report.fallback_used or execution.policy_fallback_used,
+            "fallback_reason": report.fallback_reason or execution.policy_fallback_reason,
+            "input_tokens": _sum_tokens(report.input_tokens, policy_input),
+            "output_tokens": _sum_tokens(report.output_tokens, policy_output),
             "evidence": evidence,
             "tool_trace": trace,
             "tool_call_count": len(execution.tool_results),
         }
     )
+
+
+def _sum_tokens(first: int | None, second: int | None) -> int | None:
+    if first is None and second is None:
+        return None
+    return (first or 0) + (second or 0)
 
 
 def render_markdown(report: EvaluationReport) -> bytes:
@@ -242,11 +256,31 @@ def run_evaluation(
             model=settings.model_name,
             prompt_version=prompt_version or PROMPT_VERSION,
         )
+        agent_mode: AgentMode = "B0"
+        policy = None
+    elif model_mode == "B2":
+        # B2 is the tool-calling investigation. The report is still written by
+        # the rule adapter so the comparison against B0 isolates the
+        # evidence-gathering step; a model-backed writer would confound it.
+        settings = get_settings()
+        adapter = RuleBasedModelAdapter()
+        agent_mode = "B2"
+        policy = OpenAIToolCallingPolicy(
+            base_url=settings.model_base_url,
+            api_key=settings.model_api_key,
+            model=settings.model_name,
+        )
     else:
         adapter = RuleBasedModelAdapter()
+        agent_mode = "B0"
+        policy = None
 
     orchestrator = DiagnosisOrchestrator(
-        source=DuckDBAnalyticsSource(), artifacts=artifacts, adapter=adapter
+        source=DuckDBAnalyticsSource(),
+        artifacts=artifacts,
+        adapter=adapter,
+        agent_mode=agent_mode,
+        investigation_policy=policy,
     )
     results: list[ScenarioResult] = []
 

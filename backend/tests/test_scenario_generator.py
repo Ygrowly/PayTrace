@@ -95,7 +95,9 @@ def test_mixed_failure_has_both_signatures():
     assert EventType.PAYMENT_TIMEOUT in types
     assert set(gt.expected_root_causes) == {"BENEFIT_SELECTION_FRICTION", "CHANNEL_TIMEOUT"}
     assert set(gt.expected_anomalous_stages) == {
-        FunnelStage.PAYMENT_METHOD_SELECTED.value,
+        # Loss is attributed to the stage an intent failed to reach: a user who
+        # abandons at method selection never reaches PAYMENT_INITIATED.
+        FunnelStage.PAYMENT_INITIATED.value,
         FunnelStage.CHANNEL_SUCCEEDED.value,
     }
 
@@ -249,3 +251,55 @@ def test_adversarial_noise_has_no_config_changes():
 
     changes = generate_config_changes("adversarial_noise", seed=42)
     assert changes == []
+
+
+# ---------------------------------------------------------------------------
+# Fault impact is observable and measurable (W3)
+# ---------------------------------------------------------------------------
+
+
+def test_cancelled_intents_stop_advancing_through_the_funnel():
+    """Cancellation must actually remove the intent from the funnel.
+
+    Otherwise benefit friction is invisible to every funnel-based tool: the
+    scenario's expected stage never degrades and its loss cannot be attributed.
+    """
+    events, _ = generate_scenario(ScenarioConfig(kind="benefit_friction", seed=42, num_intents=300))
+    incident = [e for e in events if e.period == Period.INCIDENT]
+
+    reached_after_cancel = []
+    by_intent: dict[str, list] = {}
+    for event in incident:
+        if event.funnel_stage is not None:
+            by_intent.setdefault(event.purchase_intent_id, []).append(event)
+    cancelled_ids = {
+        e.purchase_intent_id for e in incident if e.event_type == EventType.ORDER_CANCELLED
+    }
+    reordered_ids = {e.purchase_intent_id for e in incident if e.event_type == EventType.REORDERED}
+
+    cap = FUNNEL_STAGE_ORDER.index(FunnelStage.PAYMENT_METHOD_SELECTED)
+    for intent_id in cancelled_ids - reordered_ids:
+        stages = [e.funnel_stage for e in by_intent.get(intent_id, [])]
+        # Natural attrition may stop the intent earlier; the cap only bounds it
+        # from above, so it can never be observed past the selection stage.
+        assert all(FUNNEL_STAGE_ORDER.index(s) <= cap for s in stages), intent_id
+        if FunnelStage.PAYMENT_METHOD_SELECTED in stages:
+            reached_after_cancel.append(intent_id)
+
+    assert reached_after_cancel, "some cancelled intents should have reached selection first"
+
+
+def test_ground_truth_loss_is_zero_for_clean_scenarios_and_positive_for_faults():
+    for kind in ("normal", "adversarial_noise", "adversarial_irrelevant_config", "data_gap"):
+        _, gt = generate_scenario(ScenarioConfig(kind=kind, seed=42, num_intents=200))
+        assert gt.expected_lost_intents == 0, kind
+
+    for kind in ("channel_timeout", "benefit_friction", "mixed_failure"):
+        _, gt = generate_scenario(ScenarioConfig(kind=kind, seed=42, num_intents=200))
+        assert gt.expected_lost_intents > 0, kind
+
+
+def test_ground_truth_loss_is_deterministic():
+    first = generate_scenario(ScenarioConfig(kind="mixed_failure", seed=7, num_intents=200))[1]
+    second = generate_scenario(ScenarioConfig(kind="mixed_failure", seed=7, num_intents=200))[1]
+    assert first.expected_lost_intents == second.expected_lost_intents

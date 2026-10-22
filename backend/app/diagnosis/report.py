@@ -23,6 +23,13 @@ class RootCause(BaseModel):
     )
     rank: int = Field(ge=1, description="Lower number = higher priority")
     alternative_explanation: str | None = None
+    support_status: Literal["SUPPORTED", "PARTIAL", "UNKNOWN"] = Field(
+        default="SUPPORTED",
+        description=(
+            "How well evidence supports this claim. SUPPORTED and PARTIAL claims may "
+            "account for explained loss; UNKNOWN claims never may (see R14/R15)."
+        ),
+    )
 
     model_config = {"frozen": True}
 

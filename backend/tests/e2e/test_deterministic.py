@@ -33,12 +33,18 @@ async def _body_text(browser, url: str, expected: str) -> str:
 
 
 async def test_public_workbench_pages_render(e2e_browser, web_url: str) -> None:
-    home = await _body_text(e2e_browser, web_url, "Dependency readiness")
-    assert "postgres" in home.lower()
-    assert "redis" in home.lower()
+    # Assert on what each page must *do*, not on its headings. Panel titles are
+    # copy and churn whenever the UI is reworked; the services reported, the
+    # controls offered and the modes available are the actual subject.
+    home = await _body_text(e2e_browser, web_url, "postgres")
+    for dependency in ("postgres", "redis", "minio"):
+        assert (
+            dependency in home.lower()
+        ), f"{dependency} missing from the runtime panel; body={home[:400]!r}"
+    assert "backend did not answer" not in home.lower()
 
-    incidents = await _body_text(e2e_browser, f"{web_url}/incidents", "Incident workspace")
-    assert "Create simulated incident" in incidents
+    incidents = await _body_text(e2e_browser, f"{web_url}/incidents", "Create simulated incident")
+    assert "incidents" in incidents.lower()
 
     page = await e2e_browser.get_current_page()
     assert page is not None
@@ -51,11 +57,13 @@ async def test_public_workbench_pages_render(e2e_browser, web_url: str) -> None:
         }"""
     )
     assert clicked.lower() == "true"
-    await _wait_for_body_text(e2e_browser, "Harness")
+    # The trigger reads "Create simulated incident"; only the dialog that opens
+    # reads "Create a simulated incident", so this waits for the dialog itself.
+    await _wait_for_body_text(e2e_browser, "Create a simulated incident")
 
     evaluation = await _body_text(e2e_browser, f"{web_url}/eval", "Eval Lab")
-    assert "B0 · Rule based" in evaluation
-    assert "B1 · Model backed" in evaluation
+    for mode in ("B0", "B1", "B2"):
+        assert mode in evaluation, f"{mode} is not offered in the Eval Lab"
 
 
 async def test_completed_diagnosis_renders_without_llm_browser_agent(

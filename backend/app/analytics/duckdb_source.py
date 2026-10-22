@@ -149,39 +149,46 @@ class DuckDBAnalyticsSource:
 
         deltas: list[FunnelStageDelta] = []
         anomalous: list[str] = []
-        for b, i in zip(baseline.stages, incident.stages, strict=True):
+        previous_incident_reached = incident.stages[0].reached_count
+        for index, (b, i) in enumerate(zip(baseline.stages, incident.stages, strict=True)):
             delta = i.overall_rate - b.overall_rate
-            lost = (
-                max(
-                    0,
-                    round(
-                        i.reached_count
-                        * (b.overall_rate - i.overall_rate)
-                        / max(b.overall_rate, 1e-9)
-                    ),
-                )
-                if b.overall_rate > i.overall_rate
-                else 0
+
+            # Anomaly detection uses the STEP rate (conditional on reaching the
+            # previous stage). Overall-rate deltas are diluted by upstream
+            # attrition and by dimension mix, so a localised fault (e.g. one
+            # channel timing out) may not move the overall rate past threshold.
+            is_anomalous = (
+                index > 0
+                and b.step_rate is not None
+                and i.step_rate is not None
+                and abs(i.step_rate - b.step_rate) > _ANOMALY_THRESHOLD
             )
+            if is_anomalous:
+                anomalous.append(b.stage)
+
+            # Loss is attributed to the *transition* the intents failed, and only
+            # where that transition is flagged as degraded. Two rules, one
+            # condition: charging every positive shortfall would fold sampling
+            # noise into the ledger, and estimating each stage from its own
+            # overall rate would charge the same intent again at every downstream
+            # stage. Step rates are disjoint, and the threshold keeps the total
+            # in agreement with the report's.
+            lost = 0
+            if is_anomalous and b.step_rate > i.step_rate:
+                lost = max(0, round(previous_incident_reached * (b.step_rate - i.step_rate)))
+
             deltas.append(
                 FunnelStageDelta(
                     stage=b.stage,
                     baseline_overall_rate=b.overall_rate,
                     incident_overall_rate=i.overall_rate,
+                    baseline_step_rate=b.step_rate,
+                    incident_step_rate=i.step_rate,
                     rate_delta=delta,
                     estimated_lost_intents=lost,
                 )
             )
-            # Anomaly detection uses the STEP rate (conditional on reaching the
-            # previous stage). Overall-rate deltas are diluted by upstream
-            # attrition and by dimension mix, so a localised fault (e.g. one
-            # channel timing out) may not move the overall rate past threshold.
-            if (
-                b.step_rate is not None
-                and i.step_rate is not None
-                and abs(i.step_rate - b.step_rate) > _ANOMALY_THRESHOLD
-            ):
-                anomalous.append(b.stage)
+            previous_incident_reached = i.reached_count
 
         return FunnelResult(
             baseline=baseline,

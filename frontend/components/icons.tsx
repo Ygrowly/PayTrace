@@ -35,10 +35,21 @@ const paths: Record<IconName, React.ReactNode> = {
   x: <path d="m6 6 12 12M18 6 6 18" />,
 };
 
-export function Icon({ name, size = 18, strokeWidth = 1.8 }: { name: IconName; size?: number; strokeWidth?: number }) {
+export function Icon({
+  name,
+  size = 18,
+  strokeWidth = 1.8,
+  className,
+}: {
+  name: IconName;
+  size?: number;
+  strokeWidth?: number;
+  className?: string;
+}) {
   return (
     <svg
       aria-hidden="true"
+      className={className}
       fill="none"
       height={size}
       viewBox="0 0 24 24"

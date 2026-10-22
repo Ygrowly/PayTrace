@@ -54,7 +54,13 @@ class FunnelStageDelta(BaseModel):
     baseline_overall_rate: float
     incident_overall_rate: float
     rate_delta: float  # incident - baseline
-    # Observational estimate of lost intents vs baseline reach.
+    # Conversion *into* this stage, conditional on reaching the previous one.
+    # Localization and loss attribution both use these, so the UI shows the
+    # quantity the system actually reasons about rather than the overall rate,
+    # which is diluted by upstream attrition.
+    baseline_step_rate: float | None = None
+    incident_step_rate: float | None = None
+    # Excess drop at this transition, attributed to the intents that entered it.
     estimated_lost_intents: int
 
 

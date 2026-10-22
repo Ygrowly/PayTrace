@@ -1,6 +1,11 @@
 import type { components } from "@/lib/api/schema";
 
-const DEFAULT_API_BASE = "http://localhost:8000";
+// Pinned to IPv4 on purpose. The API binds 0.0.0.0, so nothing of ours ever
+// listens on ::1 — but on Windows with Docker Desktop or WSL, resolving
+// "localhost" can prefer ::1 and silently reach whichever other stack is
+// publishing that port. A wrong host that answers 404 is worse than a refused
+// connection.
+const DEFAULT_API_BASE = "http://127.0.0.1:8000";
 
 export type Incident = components["schemas"]["IncidentResponse"];
 export type IncidentList = components["schemas"]["IncidentListResponse"];

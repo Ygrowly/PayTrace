@@ -14,9 +14,15 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.analytics.duckdb_source import DuckDBAnalyticsSource
+from app.config import get_settings
 from app.db.session import session_maker
-from app.diagnosis.orchestrator import DiagnosisOrchestrator, OrchestratorFailure
+from app.diagnosis.orchestrator import (
+    DiagnosisExecution,
+    DiagnosisOrchestrator,
+    OrchestratorFailure,
+)
 from app.harness.artifact_store import create_artifact_store
+from app.harness.investigation import InvestigationPolicy, OpenAIToolCallingPolicy
 from app.incidents import service
 from app.tasks.celery_app import celery_app
 
@@ -48,6 +54,25 @@ def _db():
 # ---------------------------------------------------------------------------
 # Task
 # ---------------------------------------------------------------------------
+
+
+def _model_provider(execution: DiagnosisExecution) -> str:
+    """Describe which evidence-gathering path actually ran.
+
+    Distinguishing ``harness_model`` from ``harness_scripted_fallback`` matters:
+    a fallback run must not read as a model-driven investigation.
+    """
+    if execution.agent_mode != "B2":
+        return (
+            "openai_compatible"
+            if execution.report.adapter_name == "OpenAICompatibleModelAdapter"
+            else "rule_based"
+        )
+    if execution.policy_fallback_used:
+        return "harness_scripted_fallback"
+    if execution.policy_name == "OpenAIToolCallingPolicy":
+        return "harness_model"
+    return "harness_scripted"
 
 
 def _log_retry_event(run_id, exc):
@@ -151,11 +176,25 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
     try:
         source = DuckDBAnalyticsSource()
         artifact_store = create_artifact_store()
+        settings = get_settings()
+        agent_mode = settings.agent_mode
+        policy: InvestigationPolicy | None = None
+        if agent_mode == "B2":
+            # A configured model drives the investigation; without one the
+            # scripted policy runs, and the run records which actually happened.
+            policy = OpenAIToolCallingPolicy(
+                base_url=settings.model_base_url,
+                api_key=settings.model_api_key,
+                model=settings.model_name,
+            )
         orch = DiagnosisOrchestrator(
             source=source,
             artifacts=artifact_store,
             dimensions=("payment_channel", "payment_method"),
             evidence_code_prefix=run_id.hex[:8],
+            agent_mode=agent_mode,
+            investigation_policy=policy,
+            max_tool_calls=settings.max_tool_calls,
         )
         execution = orch.run_detailed(
             dataset_ref=dataset_ref,
@@ -206,19 +245,32 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
             run,
             final_status,
             ontology_version=report.ontology_version,
-            model_provider=(
-                "openai_compatible"
-                if report.adapter_name == "OpenAICompatibleModelAdapter"
-                else "rule_based"
-            ),
-            model_name=report.model_name,
-            input_tokens=report.input_tokens,
-            output_tokens=report.output_tokens,
+            agent_mode=execution.agent_mode,
+            model_provider=_model_provider(execution),
+            model_name=execution.policy_model_name or report.model_name,
+            # Token usage from the investigation counts too, not only the
+            # report writer's.
+            input_tokens=execution.input_tokens or report.input_tokens,
+            output_tokens=execution.output_tokens or report.output_tokens,
             estimated_cost=report.estimated_cost,
             total_duration_ms=int((datetime.now(UTC) - run.started_at).total_seconds() * 1000)
             if run.started_at
             else None,
         )
+
+        # The governance facts of the investigation — what it was allowed to do,
+        # why it stopped, and what it refused — belong in the run's own record.
+        # Without them the trace shows tool calls but not the constraints that
+        # produced them, which is the part the harness exists to make auditable.
+        if execution.agent_mode == "B2" and execution.capability_bundle:
+            service.write_event(
+                db,
+                diagnosis_run_id=run_id,
+                event_type="harness_routed",
+                stage="COLLECTING_EVIDENCE",
+                message=str(execution.capability_bundle.get("rationale", "")),
+                payload=dict(execution.capability_bundle),
+            )
 
         service.write_event(
             db,
@@ -226,9 +278,22 @@ def run_diagnosis(self: Any, diagnosis_run_id: str) -> dict:
             event_type=f"run_{final_status.lower()}",
             stage=final_status,
             message=f"Diagnosis completed: {report.summary[:500]}",
+            payload={
+                "agent_mode": execution.agent_mode,
+                "policy": execution.policy_name,
+                "policy_fallback_used": execution.policy_fallback_used,
+                "policy_fallback_reason": execution.policy_fallback_reason,
+                "early_exit_reason": execution.early_exit_reason,
+                "tool_calls": len(execution.tool_results),
+                "hypotheses": len(execution.hypotheses),
+                "blocked_calls": list(execution.blocked_calls),
+                "degradations": list(execution.degradations),
+            },
         )
 
         service.persist_execution_trace(db, run_id=run_id, execution=execution)
+
+        service.persist_hypotheses(db, run_id=run_id, hypotheses=execution.hypotheses)
 
         service.persist_report(
             db,

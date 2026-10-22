@@ -135,10 +135,21 @@ class ToolRegistry:
         return sorted(self._tools)
 
     def execute(
-        self, tool_call_id: str, name: str, policy: ToolPolicy, **kwargs: Any
+        self,
+        tool_call_id: str,
+        name: str,
+        policy: ToolPolicy | None = None,
+        **kwargs: Any,
     ) -> ToolResult:
+        """Run a registered tool.
+
+        ``policy`` is optional because the harness enforces call policy in its
+        Before-Tool hook chain instead; passing a policy here as well would
+        double-count the budget. The fixed B0 pipeline still passes one.
+        """
         tool = self.get(name)
-        policy.before_call(tool, kwargs)
+        if policy is not None:
+            policy.before_call(tool, kwargs)
         start = time.perf_counter()
         result = tool.run(tool_call_id=tool_call_id, **kwargs)
         result.duration_ms = int((time.perf_counter() - start) * 1000)
