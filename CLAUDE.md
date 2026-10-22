@@ -1,3 +1,7 @@
+@AGENTS.md
+
+> 上方的 `@AGENTS.md` 导入了跨工具规则正本（Codex / Cursor 等读同一份）。**不要在下方重复其正文**；改约定一律改 `AGENTS.md`。
+
 # PayTrace AI Coding Rules
 
 This file contains only long-term rules that apply to every task. Architecture, milestones, directory structure, dependency versions, and commands belong in project docs, ADRs, README, Makefile, or the current Task Spec — do not duplicate them here.

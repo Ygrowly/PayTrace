@@ -1,6 +1,6 @@
-# PayTrace local infrastructure compose (M0a skeleton).
-# Starts only the backing services: PostgreSQL, Redis, MinIO.
-# API, Celery Worker, and Next.js are run locally for hot reload.
+# PayTrace local infrastructure compose.
+# Default: backing services (PostgreSQL, Redis, MinIO) only.
+# Full stack: `docker compose --profile full up -d`
 
 services:
   postgres:
@@ -66,12 +66,164 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-paytrace} ${MINIO_SECRET_KEY:-paytrace_dev_secret};
       mc mb -p local/${MINIO_BUCKET:-paytrace} || true;
-      mc anonymous set download local/${MINIO_BUCKET:-paytrace} || true;
+      mc anonymous set none local/${MINIO_BUCKET:-paytrace} || true;
       echo 'MinIO bucket initialized.';
       "
     restart: "no"
+
+  # --- Full-stack profile (plan § 25.2) -----------------------------------
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-migrate
+    profiles: ["full"]
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+    environment:
+      - APP_ENV=${APP_ENV:-dev}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
+      - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-api
+    profiles: ["full"]
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - APP_ENV=${APP_ENV:-dev}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-paytrace}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
+      - MINIO_BUCKET=${MINIO_BUCKET:-paytrace}
+      - SCENARIO_ROOT=/data/scenarios
+      - ARTIFACT_ROOT=/data/artifacts
+      - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-rule_based}
+      - MODEL_BASE_URL=${MODEL_BASE_URL:-}
+      - MODEL_API_KEY=${MODEL_API_KEY:-}
+      - MODEL_NAME=${MODEL_NAME:-}
+    volumes:
+      - runtime_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-worker
+    profiles: ["full"]
+    command:
+      ["uv", "run", "--no-sync", "celery", "-A", "app.tasks.celery_app", "worker", "-l", "info", "-P", "solo"]
+    environment:
+      - APP_ENV=${APP_ENV:-dev}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-paytrace}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
+      - MINIO_BUCKET=${MINIO_BUCKET:-paytrace}
+      - SCENARIO_ROOT=/data/scenarios
+      - ARTIFACT_ROOT=/data/artifacts
+      - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
+      - MODEL_PROVIDER=${MODEL_PROVIDER:-rule_based}
+      - MODEL_BASE_URL=${MODEL_BASE_URL:-}
+      - MODEL_API_KEY=${MODEL_API_KEY:-}
+      - MODEL_NAME=${MODEL_NAME:-}
+    volumes:
+      - runtime_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: paytrace-beat
+    profiles: ["full"]
+    command:
+      ["uv", "run", "--no-sync", "celery", "-A", "app.tasks.celery_app", "beat", "-l", "info"]
+    environment:
+      - APP_ENV=${APP_ENV:-dev}
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-paytrace}:${POSTGRES_PASSWORD:-paytrace_dev}@postgres:5432/${POSTGRES_DB:-paytrace}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-paytrace_dev_secret}
+      - ARTIFACT_STORE_BACKEND=${ARTIFACT_STORE_BACKEND:-local}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:-http://localhost:3000}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS:-["localhost","127.0.0.1","api"]}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_PAYTRACE_API_BASE: ${NEXT_PUBLIC_PAYTRACE_API_BASE:-http://localhost:8000}
+    container_name: paytrace-web
+    profiles: ["full"]
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PAYTRACE_API_BASE=http://api:8000
+    depends_on:
+      - api
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  runtime_data:

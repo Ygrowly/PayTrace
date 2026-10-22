@@ -36,6 +36,11 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    // Next 16.2's generated route validator is checked by `next build`, but
+    // currently conflicts with the repository's pinned TypeScript version
+    // when invoked directly via `tsc --noEmit`.
+    ".next/types/validator.ts",
+    ".next/dev/types/validator.ts"
   ]
 }

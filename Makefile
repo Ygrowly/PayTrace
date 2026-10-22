@@ -1,11 +1,10 @@
 # PayTrace Makefile.
 #
-# M0a: skeleton + infra.
-# M0b: real backend / frontend / migration / OpenAPI targets.
+# M3: real evaluation runner, API, frontend and report artifacts.
 
 .PHONY: help infra-up infra-down migrate \
         run-api run-worker run-web \
-        gen-openapi generate-scenarios evaluate-rule-based e2e \
+        gen-openapi generate-scenarios evaluate-rule-based evaluate-matrix smoke-demo e2e e2e-deterministic \
         backend-lint backend-test frontend-lint frontend-typecheck frontend-test frontend-build
 
 SHELL := /bin/sh
@@ -16,19 +15,24 @@ help:
 	@echo "Infrastructure:"
 	@echo "  make infra-up       Start PostgreSQL, Redis, MinIO"
 	@echo "  make infra-down     Stop backing services"
+	@echo "  make full-up        Start full stack (infra + API + worker + web)"
+	@echo "  make full-down      Stop full stack"
 	@echo "  make migrate        Run Alembic migrations"
 	@echo ""
 	@echo "Application:"
 	@echo "  make run-api        Start FastAPI on :8000"
 	@echo "  make run-worker     Start Celery worker"
 	@echo "  make run-web        Start Next.js on :3000"
+	@echo "  make smoke-demo     Run deterministic Incident -> diagnosis API demo"
+	@echo "  make evaluate-matrix Run deterministic multi-seed B0 evaluation"
+	@echo "  make e2e-deterministic Run browser smoke without an LLM"
 	@echo ""
 	@echo "Contracts:"
 	@echo "  make gen-openapi    Export backend/openapi.json + regenerate frontend types"
 	@echo ""
 	@echo "Quality gates:"
 	@echo "  make lint           Ruff + ESLint"
-	@echo "  make test           Backend pytest + frontend unit tests"
+	@echo "  make test           Backend pytest + current frontend test script"
 
 infra-up:
 	@echo "[infra] Starting backing services..."
@@ -38,6 +42,15 @@ infra-up:
 infra-down:
 	@echo "[infra] Stopping backing services..."
 	docker compose down
+
+full-up:
+	@echo "[full] Starting full stack..."
+	docker compose --profile full up -d --build
+	@echo "[full] Run 'docker compose ps' to verify health."
+
+full-down:
+	@echo "[full] Stopping full stack..."
+	docker compose --profile full down
 
 # --- Backend ----------------------------------------------------------------
 migrate:
@@ -80,12 +93,32 @@ lint: backend-lint frontend-lint frontend-typecheck
 
 test: backend-test frontend-test
 
-# --- Placeholders (later milestones) ---------------------------------------
+# --- Utilities and explicit E2E --------------------------------------------
 generate-scenarios:
-	@echo "[placeholder] Scenario generator arrives in M1."
+	cd backend && uv run python scripts/generate_scenarios.py
 
 evaluate-rule-based:
-	@echo "[placeholder] Evaluation runner arrives in M3."
+	cd backend && uv run python scripts/evaluate_rule_based.py
+
+evaluate-matrix:
+	cd backend && uv run python scripts/evaluate_matrix.py
+
+smoke-demo:
+	cd backend && uv run python scripts/smoke_demo.py
 
 e2e:
-	@echo "[placeholder] Playwright E2E arrives in M3/M4."
+	@echo "[e2e] Running deterministic and optional LLM browser tests."
+	@echo "[e2e] Prerequisites (must already be running):"
+	@echo "[e2e]   make infra-up && make migrate"
+	@echo "[e2e]   make run-api   (terminal 1)"
+	@echo "[e2e]   make run-worker (terminal 2)"
+	@echo "[e2e]   make run-web   (terminal 3)"
+	@echo "[e2e]   .env with MODEL_API_KEY/MODEL_BASE_URL/MODEL_NAME"
+	@echo "[e2e]   uv sync --extra dev --extra e2e (one-time)"
+	@echo ""
+	cd backend && uv run pytest tests/e2e/ -m e2e -o "addopts=" -v
+
+e2e-deterministic:
+	@echo "[e2e] Running deterministic browser tests (no model call)."
+	@echo "[e2e] Requires API, worker, web, Chrome, and the backend e2e extra."
+	cd backend && uv run pytest tests/e2e/test_deterministic.py -m deterministic_e2e -o "addopts=" -v

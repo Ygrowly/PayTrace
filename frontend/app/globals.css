@@ -1,15 +1,44 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
-}
+/*
+ * PayTrace design tokens — "Loss Ledger".
+ *
+ * The product's job is to make a payment team believe a number, so the visual
+ * language is bookkeeping rather than dashboard: paper, rules, and figures that
+ * line up. Three state colours carry the evidence contract; everything else
+ * stays quiet so those three read at a glance.
+ */
+@theme {
+  /* Ground and ink */
+  --color-paper: #f4f5f2;
+  --color-paper-2: #eceee9;
+  --color-surface: #ffffff;
+  --color-ink: #14161a;
+  --color-ink-2: #4a4f5a;
+  --color-ink-3: #7c818c;
+  --color-rule: #e1e2db;
+  --color-rule-2: #c7c8c0;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Accent — desaturated petrol. Actions and active state only. */
+  --color-petrol: #10394b;
+  --color-petrol-2: #1c5570;
+  --color-petrol-soft: #e3ecef;
+
+  /* Evidence contract — the one place colour carries meaning. */
+  --color-settled: #1d6b57; /* SUPPORTED — the evidence carries the claim */
+  --color-settled-soft: #e0eee8;
+  --color-partial: #8a5a0f; /* PARTIAL — observational or incomplete */
+  --color-partial-soft: #f6ecd8;
+  --color-open: #5b5f6e; /* UNKNOWN / open item — honestly not established */
+  --color-open-soft: #e8e9ec;
+
+  /* Genuine failure only — never used for a weak claim. */
+  --color-alarm: #a32a1c;
+  --color-alarm-soft: #f6e6e3;
+
+  --font-display: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SFMono-Regular", monospace;
 }
 
 html,
@@ -19,11 +48,67 @@ body {
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
-    Arial, sans-serif;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Every figure in this product is meant to be compared with the one above it. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Headings and figures get the display face; body stays on Plex Sans. */
+.display {
+  font-family: var(--font-display);
+  letter-spacing: -0.015em;
+}
+
+/* Small caps label used throughout the ledger: section eyes, column heads. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Focus is always visible; this product is used with a keyboard during review. */
+:where(a, button, input, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-petrol-2);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--color-petrol-soft);
+  color: var(--color-petrol);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
